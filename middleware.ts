@@ -1,66 +1,48 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
-  // Public routes — skip auth entirely (no Supabase call = faster)
-  const publicRoutes = ['/login', '/reset-password', '/signer/', '/payer/', '/api/webhooks/']
+  // Public routes — no auth needed
+  const publicRoutes = ['/login', '/reset-password', '/signer/', '/payer/', '/api/']
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
 
-  // For public routes (not login/root), just pass through immediately
-  if (isPublicRoute && pathname !== '/login') {
-    return NextResponse.next({ request })
+  if (isPublicRoute) {
+    return NextResponse.next()
   }
 
-  let supabaseResponse = NextResponse.next({
-    request,
-  })
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
+  // Check for Supabase auth cookie (sb-*-auth-token)
+  const cookies = request.cookies.getAll()
+  const hasAuthCookie = cookies.some(c =>
+    c.name.includes('-auth-token') || c.name.includes('sb-')
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user && !isPublicRoute && pathname !== '/') {
+  // No auth cookie → redirect to login
+  if (!hasAuthCookie && pathname !== '/') {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  if (user && (pathname === '/login' || pathname === '/')) {
+  // Has auth cookie on login page → redirect to dashboard
+  if (hasAuthCookie && (pathname === '/login' || pathname === '/')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 
-  return supabaseResponse
+  // Root without cookie → login
+  if (pathname === '/') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  return NextResponse.next()
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|icon-.*\\.png|logo-.*\\.png|manifest\\.json|.*\\.svg$|api/webhooks|api/cron|api/branding|api/logo).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|icon-.*\\.png|logo-.*\\.png|manifest\\.json|.*\\.svg$).*)',
   ],
 }
