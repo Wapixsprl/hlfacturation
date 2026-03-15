@@ -373,7 +373,7 @@ export async function GET(request: NextRequest) {
 
         // Get unpaid echeances for these factures
         const factureAchatIds = (facturesAchat || []).map((f) => f.id)
-        let echeancesMap: Record<string, { date_echeance: string; montant: number }[]> = {}
+        const echeancesMap: Record<string, { date_echeance: string; montant: number }[]> = {}
 
         if (factureAchatIds.length > 0) {
           const { data: echeances } = await supabase

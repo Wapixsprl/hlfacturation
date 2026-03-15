@@ -11,7 +11,7 @@ export default async function FacturesPage() {
 
   // Fetch paiements for computing "reste a payer"
   const factureIds = (factures || []).map((f) => f.id)
-  let paiementMap: Record<string, number> = {}
+  const paiementMap: Record<string, number> = {}
   if (factureIds.length > 0) {
     const { data: paiements } = await supabase
       .from('paiements_clients')
