@@ -187,8 +187,7 @@ function LogoUpload({ entreprise }: { entreprise: Entreprise }) {
 
       if (!res.ok) throw new Error(data.error || 'Erreur upload')
 
-      // Add cache-buster to force image refresh (same URL = browser cache)
-      setLogoUrl(data.logo_url + '?t=' + Date.now())
+      setLogoUrl(data.logo_url)
       toast.success('Logo mis à jour')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur lors de l\'upload')

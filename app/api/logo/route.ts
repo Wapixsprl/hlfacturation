@@ -24,9 +24,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Format non supporté. Utilisez PNG, JPG, SVG ou WebP.' }, { status: 400 })
   }
 
-  const filePath = `${utilisateur.entreprise_id}/logo.${ext}`
+  // Use unique filename with timestamp to bust all caches (browser, CDN, Next.js)
+  const timestamp = Date.now()
+  const filePath = `${utilisateur.entreprise_id}/logo-${timestamp}.${ext}`
 
-  // Delete old logo files
+  // Delete ALL old logo files in the folder
   const { data: existing } = await supabase.storage.from('logos').list(utilisateur.entreprise_id)
   if (existing && existing.length > 0) {
     await supabase.storage.from('logos').remove(existing.map(f => `${utilisateur.entreprise_id}/${f.name}`))
@@ -47,7 +49,7 @@ export async function POST(request: NextRequest) {
   const { data: urlData } = supabase.storage.from('logos').getPublicUrl(filePath)
   const logoUrl = urlData.publicUrl
 
-  // Update entreprise
+  // Update entreprise with new unique URL
   await supabase
     .from('entreprises')
     .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
