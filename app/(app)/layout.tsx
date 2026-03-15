@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Toaster } from 'sonner'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
+import { MainContent } from '@/components/layout/MainContent'
 
 export default async function AppLayout({
   children,
@@ -45,12 +46,12 @@ export default async function AppLayout({
   return (
     <div className="min-h-screen bg-[#F9FAFB]">
       <Sidebar utilisateur={utilisateur} />
-      <div className="lg:pl-[240px]">
+      <MainContent>
         <Header utilisateur={utilisateur} />
         <main className="px-5 sm:px-8 py-6 max-w-7xl mx-auto">
           {children}
         </main>
-      </div>
+      </MainContent>
       <Toaster position="top-right" richColors />
     </div>
   )
