@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import Image from 'next/image'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
@@ -188,7 +187,8 @@ function LogoUpload({ entreprise }: { entreprise: Entreprise }) {
 
       if (!res.ok) throw new Error(data.error || 'Erreur upload')
 
-      setLogoUrl(data.logo_url)
+      // Add cache-buster to force image refresh (same URL = browser cache)
+      setLogoUrl(data.logo_url + '?t=' + Date.now())
       toast.success('Logo mis à jour')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur lors de l\'upload')
@@ -221,7 +221,8 @@ function LogoUpload({ entreprise }: { entreprise: Entreprise }) {
           {/* Preview */}
           <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center bg-gray-50 overflow-hidden shrink-0">
             {logoUrl ? (
-              <Image src={logoUrl} alt="Logo" width={80} height={80} className="w-full h-full object-contain p-1" />
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="Logo" width={80} height={80} className="w-full h-full object-contain p-1" />
             ) : (
               <Upload className="h-6 w-6 text-gray-300" />
             )}
