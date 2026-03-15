@@ -14,6 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,6 +61,17 @@ export function FournisseursPageContent({ initialFournisseurs, stats }: Props) {
       .toLowerCase()
       .includes(search.toLowerCase())
   }), [fournisseurs, search])
+
+  const columnConfigs: ColumnConfig<FournisseurWithAchat>[] = useMemo(() => [
+    { key: 'raison_sociale', getValue: (f) => f.raison_sociale, sortType: 'string' as const },
+    { key: 'contact', getValue: (f) => f.contact_nom || '', sortType: 'string' as const },
+    { key: 'email', getValue: (f) => f.email || '', sortType: 'string' as const },
+    { key: 'telephone', getValue: (f) => f.telephone || '', sortType: 'string' as const },
+    { key: 'tva', getValue: (f) => f.tva_numero || '', sortType: 'string' as const },
+    { key: 'dernier_achat', getValue: (f) => f.dernier_achat || '', sortType: 'date' as const },
+  ], [])
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
 
   const refreshFournisseurs = async () => {
     const { data } = await supabase
@@ -146,7 +159,7 @@ export function FournisseursPageContent({ initialFournisseurs, stats }: Props) {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {sortedFiltered.length === 0 ? (
         <div className="text-center py-16 text-[#9CA3AF]">
           <Truck className="h-10 w-10 mx-auto mb-3 opacity-40" />
           <p className="text-[13px]">Aucun fournisseur trouve</p>
@@ -156,17 +169,70 @@ export function FournisseursPageContent({ initialFournisseurs, stats }: Props) {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">Raison sociale</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Contact</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Email</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Telephone</TableHead>
-                <TableHead className="hidden lg:table-cell text-[#6B7280]">TVA</TableHead>
-                <TableHead className="hidden lg:table-cell text-[#6B7280]">Dernier achat</TableHead>
+                <SortableTableHead
+                  label="Raison sociale"
+                  columnKey="raison_sociale"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['raison_sociale'] || ''}
+                  onFilterChange={setColumnFilter}
+                />
+                <SortableTableHead
+                  label="Contact"
+                  columnKey="contact"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['contact'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden md:table-cell"
+                />
+                <SortableTableHead
+                  label="Email"
+                  columnKey="email"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['email'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden md:table-cell"
+                />
+                <SortableTableHead
+                  label="Telephone"
+                  columnKey="telephone"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['telephone'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden md:table-cell"
+                />
+                <SortableTableHead
+                  label="TVA"
+                  columnKey="tva"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['tva'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden lg:table-cell"
+                />
+                <SortableTableHead
+                  label="Dernier achat"
+                  columnKey="dernier_achat"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['dernier_achat'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden lg:table-cell"
+                />
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((fournisseur) => (
+              {sortedFiltered.map((fournisseur) => (
                 <TableRow
                   key={fournisseur.id}
                   className="cursor-pointer hover:bg-[#F9FAFB]/50"

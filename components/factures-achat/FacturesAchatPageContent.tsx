@@ -14,6 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -92,6 +94,18 @@ export function FacturesAchatPageContent({ initialFactures }: Props) {
     const matchDateFin = !dateFin || f.date_facture <= dateFin
     return matchSearch && matchStatut && matchDateDebut && matchDateFin
   })
+
+  const columnConfigs: ColumnConfig<FactureAchatWithFournisseur>[] = useMemo(() => [
+    { key: 'numero', getValue: (f) => f.numero_fournisseur || '', sortType: 'string' as const },
+    { key: 'fournisseur', getValue: (f) => f.fournisseur?.raison_sociale || '', sortType: 'string' as const },
+    { key: 'designation', getValue: (f) => f.designation || '', sortType: 'string' as const },
+    { key: 'categorie', getValue: (f) => CATEGORIE_LABELS[f.categorie] || f.categorie, sortType: 'string' as const },
+    { key: 'date', getValue: (f) => f.date_facture, sortType: 'date' as const },
+    { key: 'montant_ttc', getValue: (f) => f.total_ttc, sortType: 'number' as const },
+    { key: 'statut', getValue: (f) => STATUT_LABELS[f.statut] || f.statut, sortType: 'string' as const },
+  ], [])
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
 
   // Statistics computed on filtered results
   const stats = useMemo(() => {
@@ -265,7 +279,7 @@ export function FacturesAchatPageContent({ initialFactures }: Props) {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {sortedFiltered.length === 0 ? (
         <div className="text-center py-16 text-[#9CA3AF]">
           <ShoppingCart className="h-10 w-10 mx-auto mb-3 opacity-40" />
           <p className="text-[13px]">Aucune facture d&apos;achat trouvee</p>
@@ -275,18 +289,18 @@ export function FacturesAchatPageContent({ initialFactures }: Props) {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">N° Fournisseur</TableHead>
-                <TableHead className="text-[#6B7280]">Fournisseur</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Designation</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Categorie</TableHead>
-                <TableHead className="text-[#6B7280]">Date</TableHead>
-                <TableHead className="text-right text-[#6B7280]">Montant TTC</TableHead>
-                <TableHead className="text-[#6B7280]">Statut</TableHead>
+                <SortableTableHead label="N° Fournisseur" columnKey="numero" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['numero'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Fournisseur" columnKey="fournisseur" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['fournisseur'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Designation" columnKey="designation" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['designation'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Categorie" columnKey="categorie" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['categorie'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Date" columnKey="date" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['date'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Montant TTC" columnKey="montant_ttc" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['montant_ttc'] || ''} onFilterChange={setColumnFilter} align="right" />
+                <SortableTableHead label="Statut" columnKey="statut" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['statut'] || ''} onFilterChange={setColumnFilter} />
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((facture) => (
+              {sortedFiltered.map((facture) => (
                 <TableRow key={facture.id} className="hover:bg-[#F9FAFB]/50">
                   <TableCell className="font-medium text-[#111827]">
                     {facture.numero_fournisseur || '\u2014'}

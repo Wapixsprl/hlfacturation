@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Devis, Client } from '@/types/database'
@@ -90,6 +92,17 @@ export function DevisPageContent({ initialDevis }: Props) {
     )
   }
 
+  const columnConfigs: ColumnConfig<DevisWithClient>[] = useMemo(() => [
+    { key: 'numero', getValue: (d) => d.numero, sortType: 'string' as const },
+    { key: 'client', getValue: (d) => getClientName(d), sortType: 'string' as const },
+    { key: 'titre', getValue: (d) => d.titre || '', sortType: 'string' as const },
+    { key: 'date', getValue: (d) => d.date_devis, sortType: 'date' as const },
+    { key: 'montant_ht', getValue: (d) => d.total_ht, sortType: 'number' as const },
+    { key: 'montant_ttc', getValue: (d) => d.total_ttc, sortType: 'number' as const },
+    { key: 'statut', getValue: (d) => statutConfig[d.statut]?.label || d.statut, sortType: 'string' as const },
+    { key: 'vues', getValue: (d) => d.email_ouvertures || 0, sortType: 'number' as const },
+  ], [])
+
   const filtered = devisList.filter((d) => {
     const clientName = getClientName(d)
     const matchSearch = [d.numero, clientName, d.titre]
@@ -102,6 +115,8 @@ export function DevisPageContent({ initialDevis }: Props) {
     const matchDateFin = !dateFin || d.date_devis <= dateFin
     return matchSearch && matchStatut && matchDateDebut && matchDateFin
   })
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
 
   // Statistics computed on filtered results
   const stats = useMemo(() => {
@@ -265,7 +280,7 @@ export function DevisPageContent({ initialDevis }: Props) {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {sortedFiltered.length === 0 ? (
         <div className="text-center py-16 text-[#9CA3AF]">
           <FileText className="h-10 w-10 mx-auto mb-3 opacity-40" />
           <p className="text-[13px]">Aucun devis trouve</p>
@@ -275,19 +290,19 @@ export function DevisPageContent({ initialDevis }: Props) {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">Numero</TableHead>
-                <TableHead className="text-[#6B7280]">Client</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Titre</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Date</TableHead>
-                <TableHead className="text-right hidden md:table-cell text-[#6B7280]">Montant HT</TableHead>
-                <TableHead className="text-right text-[#6B7280]">Montant TTC</TableHead>
-                <TableHead className="text-[#6B7280]">Statut</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Vues</TableHead>
+                <SortableTableHead label="Numero" columnKey="numero" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['numero'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Client" columnKey="client" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['client'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Titre" columnKey="titre" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['titre'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Date" columnKey="date" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['date'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Montant HT" columnKey="montant_ht" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['montant_ht'] || ''} onFilterChange={setColumnFilter} align="right" className="hidden md:table-cell" />
+                <SortableTableHead label="Montant TTC" columnKey="montant_ttc" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['montant_ttc'] || ''} onFilterChange={setColumnFilter} align="right" />
+                <SortableTableHead label="Statut" columnKey="statut" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['statut'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Vues" columnKey="vues" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['vues'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((d) => (
+              {sortedFiltered.map((d) => (
                 <TableRow key={d.id} className="hover:bg-[#F9FAFB]/50">
                   <TableCell>
                     <Link

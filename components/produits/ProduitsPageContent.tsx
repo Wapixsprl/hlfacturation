@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -84,6 +86,18 @@ export function ProduitsPageContent({ initialProduits }: Props) {
     const matchCat = catFilter === 'tous' || p.categorie === catFilter
     return matchSearch && matchCat
   })
+
+  const columnConfigs: ColumnConfig<Produit>[] = useMemo(() => [
+    { key: 'reference', getValue: (p) => p.reference || '', sortType: 'string' as const },
+    { key: 'designation', getValue: (p) => p.designation, sortType: 'string' as const },
+    { key: 'categorie', getValue: (p) => categorieLabels[p.categorie] || p.categorie, sortType: 'string' as const },
+    { key: 'prix_ht', getValue: (p) => p.prix_ht, sortType: 'number' as const },
+    { key: 'prix_ttc', getValue: (p) => Math.round(p.prix_ht * (1 + p.taux_tva / 100) * 100) / 100, sortType: 'number' as const },
+    { key: 'taux_tva', getValue: (p) => p.taux_tva, sortType: 'number' as const },
+    { key: 'unite', getValue: (p) => uniteLabels[p.unite] || p.unite, sortType: 'string' as const },
+  ], [])
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
 
   const refreshProduits = async () => {
     const { data } = await supabase
@@ -225,7 +239,7 @@ export function ProduitsPageContent({ initialProduits }: Props) {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {sortedFiltered.length === 0 ? (
         <div className="text-center py-16 text-[#9CA3AF]">
           <Package className="h-10 w-10 mx-auto mb-3 opacity-40" />
           <p className="text-[13px]">Aucun produit trouve</p>
@@ -235,18 +249,18 @@ export function ProduitsPageContent({ initialProduits }: Props) {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">Ref.</TableHead>
-                <TableHead className="text-[#6B7280]">Designation</TableHead>
-                <TableHead className="text-[#6B7280]">Categorie</TableHead>
-                <TableHead className="text-right text-[#6B7280]">Prix HT</TableHead>
-                <TableHead className="text-right hidden md:table-cell text-[#6B7280]">Prix TTC</TableHead>
-                <TableHead className="text-[#6B7280]">TVA</TableHead>
-                <TableHead className="text-[#6B7280]">Unite</TableHead>
+                <SortableTableHead label="Ref." columnKey="reference" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['reference'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Designation" columnKey="designation" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['designation'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Categorie" columnKey="categorie" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['categorie'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Prix HT" columnKey="prix_ht" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['prix_ht'] || ''} onFilterChange={setColumnFilter} align="right" />
+                <SortableTableHead label="Prix TTC" columnKey="prix_ttc" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['prix_ttc'] || ''} onFilterChange={setColumnFilter} align="right" className="hidden md:table-cell" />
+                <SortableTableHead label="TVA" columnKey="taux_tva" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['taux_tva'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Unite" columnKey="unite" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['unite'] || ''} onFilterChange={setColumnFilter} />
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((p) => {
+              {sortedFiltered.map((p) => {
                 const prixTTC = Math.round(p.prix_ht * (1 + p.taux_tva / 100) * 100) / 100
                 return (
                   <TableRow key={p.id} className="hover:bg-[#F9FAFB]/50">

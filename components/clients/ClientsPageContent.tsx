@@ -4,6 +4,8 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Client } from '@/types/database'
 import { formatDate, formatMontant } from '@/lib/utils'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -129,6 +131,20 @@ export function ClientsPageContent({ initialClients }: Props) {
     return [c.prenom, c.nom].filter(Boolean).join(' ') || '\u2014'
   }
 
+  type ClientRow = ClientWithStats
+
+  const columnConfigs: ColumnConfig<ClientRow>[] = useMemo(() => [
+    { key: 'nom', getValue: (c) => displayName(c), sortType: 'string' as const },
+    { key: 'type', getValue: (c) => c.type || '', sortType: 'string' as const },
+    { key: 'email', getValue: (c) => c.email || '', sortType: 'string' as const },
+    { key: 'telephone', getValue: (c) => c.telephone || '', sortType: 'string' as const },
+    { key: 'ville', getValue: (c) => c.ville || '', sortType: 'string' as const },
+    { key: 'ca', getValue: (c) => c.ca_total, sortType: 'number' as const },
+    { key: 'souffrance', getValue: (c) => c.total_en_souffrance, sortType: 'number' as const },
+  ], [])
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -203,7 +219,7 @@ export function ClientsPageContent({ initialClients }: Props) {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {sortedFiltered.length === 0 ? (
         <div className="text-center py-16 text-[#9CA3AF]">
           <Users className="h-10 w-10 mx-auto mb-3 opacity-40" />
           <p className="text-[13px]">Aucun client trouve</p>
@@ -213,18 +229,80 @@ export function ClientsPageContent({ initialClients }: Props) {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">Nom / Raison sociale</TableHead>
-                <TableHead className="text-[#6B7280]">Type</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Email</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Telephone</TableHead>
-                <TableHead className="hidden lg:table-cell text-[#6B7280]">Ville</TableHead>
-                <TableHead className="text-right text-[#6B7280]">CA</TableHead>
-                <TableHead className="hidden lg:table-cell text-right text-[#6B7280]">En souffrance</TableHead>
+                <SortableTableHead
+                  label="Nom / Raison sociale"
+                  columnKey="nom"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['nom'] || ''}
+                  onFilterChange={setColumnFilter}
+                />
+                <SortableTableHead
+                  label="Type"
+                  columnKey="type"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['type'] || ''}
+                  onFilterChange={setColumnFilter}
+                />
+                <SortableTableHead
+                  label="Email"
+                  columnKey="email"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['email'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden md:table-cell"
+                />
+                <SortableTableHead
+                  label="Telephone"
+                  columnKey="telephone"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['telephone'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden md:table-cell"
+                />
+                <SortableTableHead
+                  label="Ville"
+                  columnKey="ville"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['ville'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden lg:table-cell"
+                />
+                <SortableTableHead
+                  label="CA"
+                  columnKey="ca"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['ca'] || ''}
+                  onFilterChange={setColumnFilter}
+                  align="right"
+                />
+                <SortableTableHead
+                  label="En souffrance"
+                  columnKey="souffrance"
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onToggleSort={toggleSort}
+                  filterValue={columnFilters['souffrance'] || ''}
+                  onFilterChange={setColumnFilter}
+                  className="hidden lg:table-cell"
+                  align="right"
+                />
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((client) => (
+              {sortedFiltered.map((client) => (
                 <TableRow
                   key={client.id}
                   className="cursor-pointer hover:bg-[#F9FAFB]/50"

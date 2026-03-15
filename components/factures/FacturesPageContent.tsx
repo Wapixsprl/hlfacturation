@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Facture, Client } from '@/types/database'
@@ -226,6 +228,20 @@ export function FacturesPageContent({ initialFactures }: Props) {
     return Math.max(0, Math.round((f.solde_ttc - paye) * 100) / 100)
   }
 
+  const columnConfigs: ColumnConfig<FactureWithClient>[] = useMemo(() => [
+    { key: 'numero', getValue: (f) => f.numero, sortType: 'string' as const },
+    { key: 'type', getValue: (f) => f.type === 'avoir' ? 'NC' : f.type === 'acompte' ? 'Acompte' : f.type === 'situation' ? 'Situation' : 'Facture', sortType: 'string' as const },
+    { key: 'client', getValue: (f) => getClientName(f), sortType: 'string' as const },
+    { key: 'date', getValue: (f) => f.date_facture, sortType: 'date' as const },
+    { key: 'echeance', getValue: (f) => f.date_echeance || '', sortType: 'date' as const },
+    { key: 'montant_ttc', getValue: (f) => f.total_ttc, sortType: 'number' as const },
+    { key: 'reste', getValue: (f) => getRestePayer(f), sortType: 'number' as const },
+    { key: 'statut', getValue: (f) => statutConfig[f.statut]?.label || f.statut, sortType: 'string' as const },
+    { key: 'vues', getValue: (f) => f.email_ouvertures || 0, sortType: 'number' as const },
+  ], [])
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
+
   const statutTabs = [
     'tous',
     'brouillon',
@@ -370,7 +386,7 @@ export function FacturesPageContent({ initialFactures }: Props) {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {sortedFiltered.length === 0 ? (
         <div className="text-center py-16 text-[#9CA3AF]">
           <Receipt className="h-10 w-10 mx-auto mb-3 opacity-40" />
           <p className="text-[13px]">Aucune facture trouvee</p>
@@ -380,20 +396,20 @@ export function FacturesPageContent({ initialFactures }: Props) {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">Numero</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Type</TableHead>
-                <TableHead className="text-[#6B7280]">Client</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Date</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Echeance</TableHead>
-                <TableHead className="text-right text-[#6B7280]">Montant TTC</TableHead>
-                <TableHead className="text-right hidden md:table-cell text-[#6B7280]">Reste a payer</TableHead>
-                <TableHead className="text-[#6B7280]">Statut</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Vues</TableHead>
+                <SortableTableHead label="Numero" columnKey="numero" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['numero'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Type" columnKey="type" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['type'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Client" columnKey="client" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['client'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Date" columnKey="date" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['date'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Echeance" columnKey="echeance" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['echeance'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Montant TTC" columnKey="montant_ttc" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['montant_ttc'] || ''} onFilterChange={setColumnFilter} align="right" />
+                <SortableTableHead label="Reste a payer" columnKey="reste" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['reste'] || ''} onFilterChange={setColumnFilter} align="right" className="hidden md:table-cell" />
+                <SortableTableHead label="Statut" columnKey="statut" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['statut'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Vues" columnKey="vues" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['vues'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((f) => {
+              {sortedFiltered.map((f) => {
                 const restePayer = getRestePayer(f)
                 return (
                   <TableRow key={f.id} className="hover:bg-[#F9FAFB]/50">

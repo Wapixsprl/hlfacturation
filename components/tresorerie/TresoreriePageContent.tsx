@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useTableSort, type ColumnConfig } from '@/lib/hooks/useTableSort'
+import { SortableTableHead } from '@/components/shared/SortableTableHead'
 import { useRouter } from 'next/navigation'
 import type { MouvementTresorerie } from '@/types/database'
 import type { ResumeAnnuel } from '@/app/(app)/tresorerie/page'
@@ -114,6 +116,17 @@ export function TresoreriePageContent({ initialMouvements, resumesAnnuels }: Pro
     const solde = totalEncaissements - totalDecaissements
     return { totalEncaissements, totalDecaissements, solde }
   }, [filtered])
+
+  const columnConfigs: ColumnConfig<MouvementWithSource>[] = useMemo(() => [
+    { key: 'date', getValue: (m) => m.date_mouvement, sortType: 'date' as const },
+    { key: 'libelle', getValue: (m) => m.libelle, sortType: 'string' as const },
+    { key: 'type', getValue: (m) => TYPE_LABELS[m.type] || m.type, sortType: 'string' as const },
+    { key: 'source', getValue: (m) => m.source === 'auto' ? 'Auto' : 'Manuel', sortType: 'string' as const },
+    { key: 'montant', getValue: (m) => m.montant, sortType: 'number' as const },
+    { key: 'rapproche', getValue: (m) => m.rapproche ? 'Oui' : 'Non', sortType: 'string' as const },
+  ], [])
+
+  const { sortedAndFiltered: sortedFiltered, sortKey, sortDirection, columnFilters, toggleSort, setColumnFilter } = useTableSort(filtered, columnConfigs)
 
   const isManual = (m: MouvementWithSource) => m.source === 'manuel' || !m.source
 
@@ -488,24 +501,24 @@ export function TresoreriePageContent({ initialMouvements, resumesAnnuels }: Pro
           <Table>
             <TableHeader>
               <TableRow className="bg-[#F9FAFB]">
-                <TableHead className="text-[#6B7280]">Date</TableHead>
-                <TableHead className="text-[#6B7280]">Libelle</TableHead>
-                <TableHead className="text-[#6B7280]">Type</TableHead>
-                <TableHead className="hidden md:table-cell text-[#6B7280]">Source</TableHead>
-                <TableHead className="text-right text-[#6B7280]">Montant</TableHead>
-                <TableHead className="text-center text-[#6B7280]">Rapproche</TableHead>
+                <SortableTableHead label="Date" columnKey="date" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['date'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Libelle" columnKey="libelle" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['libelle'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Type" columnKey="type" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['type'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Source" columnKey="source" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['source'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="Montant" columnKey="montant" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['montant'] || ''} onFilterChange={setColumnFilter} align="right" />
+                <SortableTableHead label="Rapproche" columnKey="rapproche" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['rapproche'] || ''} onFilterChange={setColumnFilter} align="center" />
                 <TableHead className="text-right text-[#6B7280]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {sortedFiltered.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-8 text-[#9CA3AF]">
                     Aucun mouvement trouve
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((m) => (
+                sortedFiltered.map((m) => (
                   <TableRow key={m.id} className="hover:bg-[#F9FAFB]/50">
                     <TableCell className="text-[#9CA3AF]">{formatDate(m.date_mouvement)}</TableCell>
                     <TableCell>
