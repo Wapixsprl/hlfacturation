@@ -4,10 +4,11 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import { DevisPDF } from '@/lib/pdf/devis-template'
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
+  const hidePrices = request.nextUrl.searchParams.get('sans-prix') === '1'
 
   const supabase = await createClient()
   const {
@@ -39,14 +40,16 @@ export async function GET(
       lignes={lignes || []}
       client={devis.client}
       entreprise={devis.entreprise}
+      hidePrices={hidePrices}
     />
   )
 
+  const suffix = hidePrices ? '-technique' : ''
   return new Response(new Uint8Array(pdfBuffer), {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${devis.numero}.pdf"`,
+      'Content-Disposition': `attachment; filename="${devis.numero}${suffix}.pdf"`,
     },
   })
 }

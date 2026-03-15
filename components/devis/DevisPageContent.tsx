@@ -45,6 +45,7 @@ import {
   Loader2,
   FileOutput,
   Download,
+  HardHat,
   TrendingUp,
   CheckCircle2,
   Clock,
@@ -355,6 +356,12 @@ export function DevisPageContent({ initialDevis }: Props) {
                         >
                           <Download className="h-4 w-4 mr-2" />
                           Telecharger PDF
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => window.open(`/api/devis/${d.id}/pdf?sans-prix=1`, '_blank')}
+                        >
+                          <HardHat className="h-4 w-4 mr-2" />
+                          PDF sans prix (equipes)
                         </DropdownMenuItem>
                         {(d.statut === 'brouillon' || d.statut === 'envoye') && (
                           <DropdownMenuItem

@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
     fontSize: 8,
     textAlign: 'right' as const,
   },
-  // Columns widths
+  // Columns widths (with prices)
   colDesignation: { width: '40%' },
   colQte: { width: '8%', textAlign: 'right' as const },
   colUnite: { width: '8%', textAlign: 'center' as const },
@@ -178,6 +178,24 @@ const styles = StyleSheet.create({
   colRemise: { width: '10%', textAlign: 'right' as const },
   colTVA: { width: '8%', textAlign: 'right' as const },
   colTotal: { width: '12%', textAlign: 'right' as const },
+  // Columns widths (without prices — wider designation)
+  colDesignationNoPrix: { width: '72%' },
+  colQteNoPrix: { width: '14%', textAlign: 'right' as const },
+  colUniteNoPrix: { width: '14%', textAlign: 'center' as const },
+  // No prices watermark
+  noPricesBanner: {
+    backgroundColor: '#f0f0f0',
+    padding: 8,
+    borderRadius: 4,
+    marginBottom: 15,
+    textAlign: 'center' as const,
+  },
+  noPricesBannerText: {
+    fontSize: 9,
+    fontFamily: 'Helvetica-Bold',
+    color: '#888',
+    textTransform: 'uppercase' as const,
+  },
   // Section row
   sectionRow: {
     flexDirection: 'row',
@@ -390,6 +408,7 @@ export interface DevisPDFProps {
   lignes: DevisLigne[]
   client: Client
   entreprise: Entreprise
+  hidePrices?: boolean
 }
 
 // --- Component ---
@@ -402,7 +421,7 @@ function checkExonerationIntracom(client: Client): boolean {
   return prefix === 'FR' && pays === 'FR'
 }
 
-export function DevisPDF({ devis, lignes, client, entreprise }: DevisPDFProps) {
+export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false }: DevisPDFProps) {
   const isExonere = checkExonerationIntracom(client)
 
   // Client display name
@@ -534,23 +553,34 @@ export function DevisPDF({ devis, lignes, client, entreprise }: DevisPDFProps) {
           <Text style={styles.textBlock}>{devis.introduction}</Text>
         )}
 
+        {/* NO PRICES BANNER */}
+        {hidePrices && (
+          <View style={styles.noPricesBanner}>
+            <Text style={styles.noPricesBannerText}>Document technique — Sans prix</Text>
+          </View>
+        )}
+
         {/* LINES TABLE */}
         <View style={styles.table}>
           {/* Header */}
           <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeaderCell, styles.colDesignation]}>
+            <Text style={[styles.tableHeaderCell, hidePrices ? styles.colDesignationNoPrix : styles.colDesignation]}>
               Designation
             </Text>
-            <Text style={[styles.tableHeaderCell, styles.colQte]}>Qte</Text>
-            <Text style={[styles.tableHeaderCell, styles.colUnite]}>Unite</Text>
-            <Text style={[styles.tableHeaderCell, styles.colPU]}>PU HT</Text>
-            <Text style={[styles.tableHeaderCell, styles.colRemise]}>
-              Remise
-            </Text>
-            <Text style={[styles.tableHeaderCell, styles.colTVA]}>TVA</Text>
-            <Text style={[styles.tableHeaderCell, styles.colTotal]}>
-              Total HT
-            </Text>
+            <Text style={[styles.tableHeaderCell, hidePrices ? styles.colQteNoPrix : styles.colQte]}>Qte</Text>
+            <Text style={[styles.tableHeaderCell, hidePrices ? styles.colUniteNoPrix : styles.colUnite]}>Unite</Text>
+            {!hidePrices && (
+              <>
+                <Text style={[styles.tableHeaderCell, styles.colPU]}>PU HT</Text>
+                <Text style={[styles.tableHeaderCell, styles.colRemise]}>
+                  Remise
+                </Text>
+                <Text style={[styles.tableHeaderCell, styles.colTVA]}>TVA</Text>
+                <Text style={[styles.tableHeaderCell, styles.colTotal]}>
+                  Total HT
+                </Text>
+              </>
+            )}
           </View>
 
           {/* Rows */}
@@ -586,7 +616,7 @@ export function DevisPDF({ devis, lignes, client, entreprise }: DevisPDFProps) {
                 key={ligne.id || i}
                 style={[styles.tableRow, isAlt ? styles.tableRowAlt : {}]}
               >
-                <View style={styles.colDesignation}>
+                <View style={hidePrices ? styles.colDesignationNoPrix : styles.colDesignation}>
                   <Text style={styles.tableCell}>
                     {ligne.designation || ''}
                   </Text>
@@ -594,37 +624,41 @@ export function DevisPDF({ devis, lignes, client, entreprise }: DevisPDFProps) {
                     <Text style={styles.description}>{ligne.description}</Text>
                   )}
                 </View>
-                <Text style={[styles.tableCellRight, styles.colQte]}>
+                <Text style={[styles.tableCellRight, hidePrices ? styles.colQteNoPrix : styles.colQte]}>
                   {ligne.quantite}
                 </Text>
-                <Text style={[styles.tableCell, styles.colUnite]}>
+                <Text style={[styles.tableCell, hidePrices ? styles.colUniteNoPrix : styles.colUnite]}>
                   {uniteLabels[ligne.unite || 'piece'] || ligne.unite || ''}
                 </Text>
-                <Text style={[styles.tableCellRight, styles.colPU]}>
-                  {fmt(ligne.prix_unitaire_ht)}
-                </Text>
-                <Text style={[styles.tableCellRight, styles.colRemise]}>
-                  {ligne.remise_pct > 0 ? fmtPct(ligne.remise_pct) : '-'}
-                </Text>
-                <Text style={[styles.tableCellRight, styles.colTVA]}>
-                  {fmtPct(ligne.taux_tva)}
-                </Text>
-                <Text
-                  style={[
-                    styles.tableCellRight,
-                    styles.colTotal,
-                    { fontFamily: 'Helvetica-Bold' },
-                  ]}
-                >
-                  {fmt(ligne.total_ht)}
-                </Text>
+                {!hidePrices && (
+                  <>
+                    <Text style={[styles.tableCellRight, styles.colPU]}>
+                      {fmt(ligne.prix_unitaire_ht)}
+                    </Text>
+                    <Text style={[styles.tableCellRight, styles.colRemise]}>
+                      {ligne.remise_pct > 0 ? fmtPct(ligne.remise_pct) : '-'}
+                    </Text>
+                    <Text style={[styles.tableCellRight, styles.colTVA]}>
+                      {fmtPct(ligne.taux_tva)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.tableCellRight,
+                        styles.colTotal,
+                        { fontFamily: 'Helvetica-Bold' },
+                      ]}
+                    >
+                      {fmt(ligne.total_ht)}
+                    </Text>
+                  </>
+                )}
               </View>
             )
           })}
         </View>
 
         {/* TVA RECAP */}
-        {Object.keys(tvaGroups).length > 0 && (
+        {!hidePrices && Object.keys(tvaGroups).length > 0 && (
           <View style={styles.tvaRecap}>
             <Text style={styles.tvaTitle}>Recapitulatif TVA</Text>
             {Object.entries(tvaGroups)
@@ -649,23 +683,25 @@ export function DevisPDF({ devis, lignes, client, entreprise }: DevisPDFProps) {
         )}
 
         {/* TOTALS */}
-        <View style={styles.totalsBlock}>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total HT</Text>
-            <Text style={styles.totalValue}>{fmt(devis.total_ht)}</Text>
+        {!hidePrices && (
+          <View style={styles.totalsBlock}>
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total HT</Text>
+              <Text style={styles.totalValue}>{fmt(devis.total_ht)}</Text>
+            </View>
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total TVA</Text>
+              <Text style={styles.totalValue}>{fmt(devis.total_tva)}</Text>
+            </View>
+            <View style={styles.totalTTCRow}>
+              <Text style={styles.totalTTCLabel}>Total TTC</Text>
+              <Text style={styles.totalTTCValue}>{fmt(devis.total_ttc)}</Text>
+            </View>
           </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total TVA</Text>
-            <Text style={styles.totalValue}>{fmt(devis.total_tva)}</Text>
-          </View>
-          <View style={styles.totalTTCRow}>
-            <Text style={styles.totalTTCLabel}>Total TTC</Text>
-            <Text style={styles.totalTTCValue}>{fmt(devis.total_ttc)}</Text>
-          </View>
-        </View>
+        )}
 
         {/* ACOMPTES SCHEDULE */}
-        {(() => {
+        {!hidePrices && (() => {
           const acomptes = (devis.acomptes_config || []) as AcompteConfig[]
           if (acomptes.length === 0) return null
           const totalPct = acomptes.reduce((s, a) => s + a.pourcentage, 0)
