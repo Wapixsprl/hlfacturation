@@ -402,3 +402,121 @@ export interface ObjectifCA {
   created_at: string
   updated_at: string
 }
+
+// --- Chantiers / Planning ---
+
+export interface Equipe {
+  id: string
+  entreprise_id: string
+  nom: string
+  couleur: string
+  responsable_id: string | null
+  actif: boolean
+  created_at: string
+  updated_at: string
+  // Relations
+  responsable?: Utilisateur
+  membres?: MembreEquipe[]
+}
+
+export interface MembreEquipe {
+  id: string
+  equipe_id: string
+  utilisateur_id: string
+  created_at: string
+  // Relations
+  utilisateur?: Utilisateur
+}
+
+export interface Chantier {
+  id: string
+  entreprise_id: string
+  devis_id: string | null
+  client_id: string
+  numero: string
+  titre: string
+  description: string | null
+  adresse: string | null
+  code_postal: string | null
+  ville: string | null
+  statut: 'a_planifier' | 'planifie' | 'en_cours' | 'termine' | 'livre'
+  priorite: 'basse' | 'normale' | 'haute' | 'urgente'
+  date_debut: string | null
+  date_fin_prevue: string | null
+  date_fin_reelle: string | null
+  equipe_id: string | null
+  budget_ht: number
+  cout_reel_ht: number
+  notes_internes: string | null
+  archived_at: string | null
+  created_at: string
+  updated_at: string
+  // Relations
+  client?: Client
+  devis?: Devis
+  equipe?: Equipe
+}
+
+export interface TacheChantier {
+  id: string
+  chantier_id: string
+  titre: string
+  description: string | null
+  date_debut: string | null
+  date_fin: string | null
+  duree_jours: number
+  dependance_id: string | null
+  equipe_id: string | null
+  statut: 'a_faire' | 'en_cours' | 'termine'
+  ordre: number
+  created_at: string
+  updated_at: string
+  // Relations
+  equipe?: Equipe
+}
+
+export interface JournalChantier {
+  id: string
+  chantier_id: string
+  auteur_id: string
+  date_entree: string
+  type: 'commentaire' | 'photo' | 'incident' | 'livraison_materiel' | 'avancement' | 'reception'
+  contenu: string | null
+  photos: string[]
+  meteo: 'ensoleille' | 'nuageux' | 'pluie' | 'neige' | null
+  avancement_pct: number | null
+  created_at: string
+  updated_at: string
+  // Relations
+  auteur?: Utilisateur
+}
+
+export interface PvReception {
+  id: string
+  chantier_id: string
+  date_reception: string
+  observations: string | null
+  reserves: { texte: string; resolu: boolean }[]
+  photos_avant: string[]
+  photos_apres: string[]
+  token_signature: string | null
+  token_expiration: string | null
+  signature_client: string | null
+  signature_date: string | null
+  signature_ip: string | null
+  signature_user_agent: string | null
+  pdf_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SousTraitantChantier {
+  id: string
+  chantier_id: string
+  fournisseur_id: string
+  role: string | null
+  montant_prevu_ht: number
+  created_at: string
+  // Relations
+  fournisseur?: Fournisseur
+}

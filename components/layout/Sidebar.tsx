@@ -28,6 +28,8 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
+  HardHat,
+  CalendarDays,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -50,6 +52,8 @@ const navigation = [
   { name: 'Produits', href: '/produits', icon: Package },
   { name: 'Devis', href: '/devis', icon: FileText },
   { name: 'Factures', href: '/factures', icon: Receipt },
+  { name: 'Chantiers', href: '/chantiers', icon: HardHat },
+  { name: 'Planning', href: '/planning', icon: CalendarDays },
   { name: 'Fournisseurs', href: '/fournisseurs', icon: Truck },
   { name: 'Achats', href: '/factures-achat', icon: ShoppingCart },
   { name: 'Tresorerie', href: '/tresorerie', icon: Wallet },

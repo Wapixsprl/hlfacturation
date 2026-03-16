@@ -176,6 +176,54 @@ export async function POST(
     return NextResponse.json({ error: 'Erreur de mise a jour' }, { status: 500 })
   }
 
+  // --- Auto-create chantier (statut 'a_planifier') ---
+  try {
+    // Check if a chantier already exists for this devis
+    const { data: existingChantier } = await supabase
+      .from('chantiers')
+      .select('id')
+      .eq('devis_id', devis.id)
+      .maybeSingle()
+
+    if (!existingChantier) {
+      // Get client info for chantier address
+      const { data: clientInfo } = await supabase
+        .from('clients')
+        .select('adresse, code_postal, ville')
+        .eq('id', devis.client_id)
+        .single()
+
+      // Get devis title
+      const { data: devisDetail } = await supabase
+        .from('devis')
+        .select('titre, total_ht')
+        .eq('id', devis.id)
+        .single()
+
+      // Generate numero CHT-YYYY-NNNN
+      const { data: numeroData } = await supabase.rpc('generate_numero', {
+        p_type: 'CHT',
+        p_entreprise_id: devis.entreprise_id,
+      })
+
+      await supabase.from('chantiers').insert({
+        entreprise_id: devis.entreprise_id,
+        devis_id: devis.id,
+        client_id: devis.client_id,
+        numero: numeroData || `CHT-${new Date().getFullYear()}-TEMP`,
+        titre: devisDetail?.titre || devis.numero,
+        adresse: clientInfo?.adresse || null,
+        code_postal: clientInfo?.code_postal || null,
+        ville: clientInfo?.ville || null,
+        statut: 'a_planifier',
+        budget_ht: devisDetail?.total_ht || 0,
+      })
+    }
+  } catch (chantierErr) {
+    // Don't fail the signature because of chantier creation errors
+    console.error('Auto-create chantier error:', chantierErr)
+  }
+
   // --- Send emails (fire & forget — don't block signature response) ---
   try {
     // 1. Get client info
