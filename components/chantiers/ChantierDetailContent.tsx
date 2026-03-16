@@ -304,10 +304,19 @@ export function ChantierDetailContent({
             <p className="text-sm text-[#6B7280] mt-0.5">{chantier.titre}</p>
           </div>
         </div>
-        <Button onClick={handleSaveChantier} disabled={saving} className="bg-[#1E2028] hover:bg-[#2a2d35]">
-          {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-          Sauvegarder
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => window.open(`/api/chantiers/${chantier.id}/rapport`, '_blank')}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Rapport PDF
+          </Button>
+          <Button onClick={handleSaveChantier} disabled={saving} className="bg-[#1E2028] hover:bg-[#2a2d35]">
+            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Sauvegarder
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}

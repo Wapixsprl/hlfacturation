@@ -21,9 +21,10 @@ import {
   isSameDay,
 } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { CalendarDays, ChevronLeft, ChevronRight, HardHat } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, GanttChart, HardHat } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { GanttView } from '@/components/planning/GanttView'
 
 interface Client {
   id: string
@@ -72,7 +73,7 @@ function hexToRgba(hex: string, alpha: number): string {
 
 export function PlanningPageContent({ initialChantiers, equipes }: PlanningPageContentProps) {
   const [currentDate, setCurrentDate] = useState(new Date())
-  const [viewMode, setViewMode] = useState<'semaine' | 'mois'>('semaine')
+  const [viewMode, setViewMode] = useState<'semaine' | 'mois' | 'gantt'>('semaine')
 
   // Week view dates (Monday start)
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 })
@@ -208,23 +209,37 @@ export function PlanningPageContent({ initialChantiers, equipes }: PlanningPageC
               >
                 Mois
               </button>
+              <button
+                onClick={() => setViewMode('gantt')}
+                className={cn(
+                  'px-3 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5',
+                  viewMode === 'gantt'
+                    ? 'bg-[#1B3A6B] text-white'
+                    : 'text-gray-600 hover:text-gray-900'
+                )}
+              >
+                <GanttChart className="h-3.5 w-3.5" />
+                Gantt
+              </button>
             </div>
 
-            {/* Navigation */}
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" onClick={goPrev} className="h-8 w-8">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm font-medium text-gray-700 min-w-[200px] text-center">
-                {headerLabel}
-              </span>
-              <Button variant="outline" size="icon" onClick={goNext} className="h-8 w-8">
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="sm" onClick={goToday} className="text-xs">
-                {"Aujourd'hui"}
-              </Button>
-            </div>
+            {/* Navigation (hidden in Gantt mode — Gantt has its own controls) */}
+            {viewMode !== 'gantt' && (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" onClick={goPrev} className="h-8 w-8">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-medium text-gray-700 min-w-[200px] text-center">
+                  {headerLabel}
+                </span>
+                <Button variant="outline" size="icon" onClick={goNext} className="h-8 w-8">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={goToday} className="text-xs">
+                  {"Aujourd'hui"}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -240,7 +255,7 @@ export function PlanningPageContent({ initialChantiers, equipes }: PlanningPageC
               weekStart={weekStart}
               weekEnd={weekEnd}
             />
-          ) : (
+          ) : viewMode === 'mois' ? (
             <MonthView
               calendarWeeks={calendarWeeks}
               dayHeaders={dayHeaders}
@@ -248,20 +263,32 @@ export function PlanningPageContent({ initialChantiers, equipes }: PlanningPageC
               chantiersWithDates={chantiersWithDates}
               chantierOnDay={chantierOnDay}
             />
+          ) : (
+            <GanttView
+              chantiers={initialChantiers}
+              equipes={equipes}
+            />
           )}
         </div>
 
         {/* Mobile list view */}
         <div className="md:hidden">
-          <MobileListView
-            viewMode={viewMode}
-            chantiersWithDates={chantiersWithDates}
-            chantierInPeriod={chantierInPeriod}
-            weekStart={weekStart}
-            weekEnd={weekEnd}
-            monthStart={monthStart}
-            monthEnd={monthEnd}
-          />
+          {viewMode === 'gantt' ? (
+            <GanttView
+              chantiers={initialChantiers}
+              equipes={equipes}
+            />
+          ) : (
+            <MobileListView
+              viewMode={viewMode}
+              chantiersWithDates={chantiersWithDates}
+              chantierInPeriod={chantierInPeriod}
+              weekStart={weekStart}
+              weekEnd={weekEnd}
+              monthStart={monthStart}
+              monthEnd={monthEnd}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -517,7 +544,7 @@ function MonthView({ calendarWeeks, dayHeaders, currentDate, chantiersWithDates,
    ============================================================ */
 
 interface MobileListViewProps {
-  viewMode: 'semaine' | 'mois'
+  viewMode: 'semaine' | 'mois' | 'gantt'
   chantiersWithDates: Chantier[]
   chantierInPeriod: (c: Chantier, start: Date, end: Date) => boolean
   weekStart: Date
