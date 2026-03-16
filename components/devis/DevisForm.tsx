@@ -619,8 +619,27 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
             </p>
           ) : (
             <div className="space-y-3">
-              {lignes.map((ligne, index) => (
-                <div key={index} className="border rounded-lg p-3">
+              {lignes.map((ligne, index) => {
+                // Compute section subtotal: show after last product before next section
+                let sectionSubtotal: number | null = null
+                if (ligne.type === 'produit') {
+                  // Check if next line is a section, saut_page, or end of array
+                  const nextLine = lignes[index + 1]
+                  if (!nextLine || nextLine.type === 'section' || nextLine.type === 'saut_page') {
+                    // Find the section header above this product
+                    let hasSection = false
+                    let subtotal = 0
+                    for (let j = index; j >= 0; j--) {
+                      if (lignes[j].type === 'section') { hasSection = true; break }
+                      if (lignes[j].type === 'produit') subtotal += lignes[j].total_ht
+                    }
+                    if (hasSection) sectionSubtotal = subtotal
+                  }
+                }
+
+                return (
+                <div key={index}>
+                <div className="border rounded-lg p-3">
                   {ligne.type === 'section' ? (
                     /* ---- SECTION ---- */
                     <div className="flex items-center gap-3">
@@ -801,7 +820,17 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                     </div>
                   )}
                 </div>
-              ))}
+                {sectionSubtotal !== null && (
+                  <div className="flex justify-end mt-1.5 pr-3">
+                    <div className="flex items-center gap-3 bg-[#F0F9FF] border border-[#BAE6FD] rounded-md px-4 py-1.5">
+                      <span className="text-xs font-medium text-[#0369A1]">Sous-total section</span>
+                      <span className="text-sm font-bold text-[#0C4A6E] font-mono">{formatMontant(sectionSubtotal)}</span>
+                    </div>
+                  </div>
+                )}
+                </div>
+                )
+              })}
             </div>
           )}
         </CardContent>

@@ -208,6 +208,27 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: 'Helvetica-Bold',
   },
+  // Section subtotal row
+  sectionSubtotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 5,
+    paddingRight: 8,
+    backgroundColor: '#f0f9ff',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#bae6fd',
+  },
+  sectionSubtotalLabel: {
+    fontSize: 7.5,
+    fontFamily: 'Helvetica-Bold',
+    color: '#0369a1',
+    marginRight: 12,
+  },
+  sectionSubtotalValue: {
+    fontSize: 8.5,
+    fontFamily: 'Helvetica-Bold',
+    color: '#0c4a6e',
+  },
   // Texte row
   texteRow: {
     padding: 5,
@@ -585,6 +606,21 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
 
           {/* Rows */}
           {lignes.map((ligne, i) => {
+            // Compute section subtotal
+            let sectionSubtotal: number | null = null
+            if (ligne.type === 'produit' && !hidePrices) {
+              const nextLine = lignes[i + 1]
+              if (!nextLine || nextLine.type === 'section' || nextLine.type === 'saut_page') {
+                let hasSection = false
+                let subtotal = 0
+                for (let j = i; j >= 0; j--) {
+                  if (lignes[j].type === 'section') { hasSection = true; break }
+                  if (lignes[j].type === 'produit') subtotal += lignes[j].total_ht
+                }
+                if (hasSection) sectionSubtotal = subtotal
+              }
+            }
+
             if (ligne.type === 'section') {
               return (
                 <View key={ligne.id || i} style={styles.sectionRow}>
@@ -612,45 +648,52 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
             // Produit
             const isAlt = i % 2 === 1
             return (
-              <View
-                key={ligne.id || i}
-                style={[styles.tableRow, isAlt ? styles.tableRowAlt : {}]}
-              >
-                <View style={hidePrices ? styles.colDesignationNoPrix : styles.colDesignation}>
-                  <Text style={styles.tableCell}>
-                    {ligne.designation || ''}
+              <View key={ligne.id || i}>
+                <View
+                  style={[styles.tableRow, isAlt ? styles.tableRowAlt : {}]}
+                >
+                  <View style={hidePrices ? styles.colDesignationNoPrix : styles.colDesignation}>
+                    <Text style={styles.tableCell}>
+                      {ligne.designation || ''}
+                    </Text>
+                    {ligne.description && (
+                      <Text style={styles.description}>{ligne.description}</Text>
+                    )}
+                  </View>
+                  <Text style={[styles.tableCellRight, hidePrices ? styles.colQteNoPrix : styles.colQte]}>
+                    {ligne.quantite}
                   </Text>
-                  {ligne.description && (
-                    <Text style={styles.description}>{ligne.description}</Text>
+                  <Text style={[styles.tableCell, hidePrices ? styles.colUniteNoPrix : styles.colUnite]}>
+                    {uniteLabels[ligne.unite || 'piece'] || ligne.unite || ''}
+                  </Text>
+                  {!hidePrices && (
+                    <>
+                      <Text style={[styles.tableCellRight, styles.colPU]}>
+                        {fmt(ligne.prix_unitaire_ht)}
+                      </Text>
+                      <Text style={[styles.tableCellRight, styles.colRemise]}>
+                        {ligne.remise_pct > 0 ? fmtPct(ligne.remise_pct) : '-'}
+                      </Text>
+                      <Text style={[styles.tableCellRight, styles.colTVA]}>
+                        {fmtPct(ligne.taux_tva)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.tableCellRight,
+                          styles.colTotal,
+                          { fontFamily: 'Helvetica-Bold' },
+                        ]}
+                      >
+                        {fmt(ligne.total_ht)}
+                      </Text>
+                    </>
                   )}
                 </View>
-                <Text style={[styles.tableCellRight, hidePrices ? styles.colQteNoPrix : styles.colQte]}>
-                  {ligne.quantite}
-                </Text>
-                <Text style={[styles.tableCell, hidePrices ? styles.colUniteNoPrix : styles.colUnite]}>
-                  {uniteLabels[ligne.unite || 'piece'] || ligne.unite || ''}
-                </Text>
-                {!hidePrices && (
-                  <>
-                    <Text style={[styles.tableCellRight, styles.colPU]}>
-                      {fmt(ligne.prix_unitaire_ht)}
-                    </Text>
-                    <Text style={[styles.tableCellRight, styles.colRemise]}>
-                      {ligne.remise_pct > 0 ? fmtPct(ligne.remise_pct) : '-'}
-                    </Text>
-                    <Text style={[styles.tableCellRight, styles.colTVA]}>
-                      {fmtPct(ligne.taux_tva)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.tableCellRight,
-                        styles.colTotal,
-                        { fontFamily: 'Helvetica-Bold' },
-                      ]}
-                    >
-                      {fmt(ligne.total_ht)}
-                    </Text>
-                  </>
+                {sectionSubtotal !== null && (
+                  <View style={styles.sectionSubtotalRow}>
+                    <Text style={styles.sectionSubtotalLabel}>Sous-total section</Text>
+                    <Text style={styles.sectionSubtotalValue}>{fmt(sectionSubtotal)}</Text>
+                  </View>
                 )}
               </View>
             )
