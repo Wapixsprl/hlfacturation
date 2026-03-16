@@ -5,7 +5,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   // Public routes — skip auth entirely (no Supabase call = faster)
-  const publicRoutes = ['/login', '/reset-password', '/signer/', '/payer/', '/api/webhooks/']
+  const publicRoutes = ['/login', '/reset-password', '/signer/', '/payer/', '/reception/', '/api/webhooks/']
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
 
   // For public routes (not login/root), just pass through immediately

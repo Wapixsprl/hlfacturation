@@ -44,7 +44,7 @@ export async function PUT(
   if (nom !== undefined) updateData.nom = nom || null
   if (prenom !== undefined) updateData.prenom = prenom || null
   if (role !== undefined) {
-    const validRoles = ['super_admin', 'utilisateur', 'comptable']
+    const validRoles = ['super_admin', 'utilisateur', 'comptable', 'ouvrier', 'equipe', 'resp_equipe']
     if (!validRoles.includes(role)) {
       return NextResponse.json({ error: 'Role invalide' }, { status: 400 })
     }

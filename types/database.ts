@@ -123,7 +123,7 @@ export interface Utilisateur {
   nom: string | null
   prenom: string | null
   email: string
-  role: 'super_admin' | 'utilisateur' | 'comptable'
+  role: 'super_admin' | 'utilisateur' | 'comptable' | 'ouvrier' | 'equipe' | 'resp_equipe'
   actif: boolean
   derniere_connexion: string | null
   created_at: string

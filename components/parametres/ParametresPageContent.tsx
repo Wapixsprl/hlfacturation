@@ -514,19 +514,25 @@ const roleLabels: Record<string, string> = {
   super_admin: 'Super Admin',
   utilisateur: 'Utilisateur',
   comptable: 'Comptable',
+  ouvrier: 'Ouvrier',
+  equipe: 'Equipe',
+  resp_equipe: 'Resp. Equipe',
 }
 
 const roleBadgeVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
   super_admin: 'default',
   utilisateur: 'secondary',
   comptable: 'outline',
+  ouvrier: 'outline',
+  equipe: 'outline',
+  resp_equipe: 'secondary',
 }
 
 interface UserFormState {
   nom: string
   prenom: string
   email: string
-  role: 'super_admin' | 'utilisateur' | 'comptable'
+  role: 'super_admin' | 'utilisateur' | 'comptable' | 'ouvrier' | 'equipe' | 'resp_equipe'
 }
 
 const emptyForm: UserFormState = {
@@ -870,12 +876,18 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
                 >
                   <option value="utilisateur">Utilisateur</option>
                   <option value="comptable">Comptable</option>
+                  <option value="resp_equipe">Resp. Equipe</option>
+                  <option value="equipe">Equipe</option>
+                  <option value="ouvrier">Ouvrier</option>
                   <option value="super_admin">Super Admin</option>
                 </select>
                 <p className="text-xs text-[#9CA3AF]">
                   {form.role === 'super_admin' && 'Acces complet a toutes les fonctionnalites.'}
                   {form.role === 'utilisateur' && 'Acces aux clients, devis et produits.'}
                   {form.role === 'comptable' && 'Acces aux factures, tresorerie et rapports.'}
+                  {form.role === 'ouvrier' && 'Acces au planning en lecture seule. Peut completer les photos et commentaires.'}
+                  {form.role === 'equipe' && 'Acces au planning en lecture seule. Peut completer les photos et champs d\'informations.'}
+                  {form.role === 'resp_equipe' && 'Acces aux chantiers et planning. Peut gerer et organiser les chantiers.'}
                 </p>
               </div>
 

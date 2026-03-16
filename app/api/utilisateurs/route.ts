@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Email et role requis' }, { status: 400 })
   }
 
-  const validRoles = ['super_admin', 'utilisateur', 'comptable']
+  const validRoles = ['super_admin', 'utilisateur', 'comptable', 'ouvrier', 'equipe', 'resp_equipe']
   if (!validRoles.includes(role)) {
     return NextResponse.json({ error: 'Role invalide' }, { status: 400 })
   }

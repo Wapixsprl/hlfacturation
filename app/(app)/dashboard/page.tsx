@@ -16,8 +16,8 @@ export default async function DashboardPage() {
         .single()
     : { data: null }
 
-  // Check if ouvrier - show simplified dashboard
-  if (utilisateur?.role === 'ouvrier' && user) {
+  // Check if terrain role (ouvrier/equipe) - show simplified dashboard
+  if (utilisateur && ['ouvrier', 'equipe'].includes(utilisateur.role) && user) {
     // Get equipes the ouvrier belongs to
     const { data: memberships } = await supabase
       .from('membres_equipe')

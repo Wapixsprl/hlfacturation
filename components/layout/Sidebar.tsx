@@ -46,24 +46,29 @@ interface SidebarProps {
   }
 }
 
-const navigation = [
-  { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Clients', href: '/clients', icon: Users },
-  { name: 'Produits', href: '/produits', icon: Package },
-  { name: 'Devis', href: '/devis', icon: FileText },
-  { name: 'Factures', href: '/factures', icon: Receipt },
-  { name: 'Chantiers', href: '/chantiers', icon: HardHat },
-  { name: 'Planning', href: '/planning', icon: CalendarDays },
-  { name: 'Fournisseurs', href: '/fournisseurs', icon: Truck },
-  { name: 'Achats', href: '/factures-achat', icon: ShoppingCart },
-  { name: 'Tresorerie', href: '/tresorerie', icon: Wallet },
-  { name: 'Parametres', href: '/parametres', icon: Settings },
+const allNavigation = [
+  { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard, roles: null },
+  { name: 'Clients', href: '/clients', icon: Users, roles: ['super_admin', 'utilisateur', 'comptable'] },
+  { name: 'Produits', href: '/produits', icon: Package, roles: ['super_admin', 'utilisateur'] },
+  { name: 'Devis', href: '/devis', icon: FileText, roles: ['super_admin', 'utilisateur', 'comptable'] },
+  { name: 'Factures', href: '/factures', icon: Receipt, roles: ['super_admin', 'comptable'] },
+  { name: 'Chantiers', href: '/chantiers', icon: HardHat, roles: ['super_admin', 'utilisateur', 'ouvrier', 'resp_equipe'] },
+  { name: 'Planning', href: '/planning', icon: CalendarDays, roles: ['super_admin', 'utilisateur', 'ouvrier', 'equipe', 'resp_equipe'] },
+  { name: 'Fournisseurs', href: '/fournisseurs', icon: Truck, roles: ['super_admin', 'utilisateur', 'comptable'] },
+  { name: 'Achats', href: '/factures-achat', icon: ShoppingCart, roles: ['super_admin', 'comptable'] },
+  { name: 'Tresorerie', href: '/tresorerie', icon: Wallet, roles: ['super_admin', 'comptable'] },
+  { name: 'Parametres', href: '/parametres', icon: Settings, roles: ['super_admin'] },
 ]
+
+function getNavigation(role: string) {
+  return allNavigation.filter(item => item.roles === null || item.roles.includes(role))
+}
 
 function SidebarContent({ utilisateur, onNavigate, collapsed = false, onToggle }: SidebarProps & { onNavigate?: () => void; collapsed?: boolean; onToggle?: () => void }) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const navigation = getNavigation(utilisateur.role)
 
   const handleLogout = async () => {
     await supabase.auth.signOut()

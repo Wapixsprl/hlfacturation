@@ -1,4 +1,4 @@
-export type Role = 'super_admin' | 'utilisateur' | 'comptable' | 'ouvrier'
+export type Role = 'super_admin' | 'utilisateur' | 'comptable' | 'ouvrier' | 'equipe' | 'resp_equipe'
 
 export type Resource =
   | 'clients'
@@ -20,9 +20,9 @@ export const PERMISSIONS: Record<Resource, { read: Role[]; write: Role[] }> = {
   factures_achat: { read: ['super_admin', 'comptable'],                write: ['super_admin', 'comptable'] },
   tresorerie:     { read: ['super_admin', 'comptable'],                write: ['super_admin', 'comptable'] },
   parametres:     { read: ['super_admin'],                             write: ['super_admin'] },
-  chantiers:      { read: ['super_admin', 'utilisateur', 'ouvrier'],   write: ['super_admin', 'utilisateur'] },
-  planning:       { read: ['super_admin', 'utilisateur', 'ouvrier'],   write: ['super_admin', 'utilisateur'] },
-  equipes:        { read: ['super_admin', 'utilisateur', 'ouvrier'],   write: ['super_admin'] },
+  chantiers:      { read: ['super_admin', 'utilisateur', 'ouvrier', 'resp_equipe'], write: ['super_admin', 'utilisateur', 'resp_equipe'] },
+  planning:       { read: ['super_admin', 'utilisateur', 'ouvrier', 'equipe', 'resp_equipe'], write: ['super_admin', 'utilisateur', 'resp_equipe'] },
+  equipes:        { read: ['super_admin', 'utilisateur', 'ouvrier', 'equipe', 'resp_equipe'], write: ['super_admin'] },
 }
 
 export function canRead(role: Role, resource: Resource): boolean {
