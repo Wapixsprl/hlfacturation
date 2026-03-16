@@ -54,7 +54,7 @@ export default async function ParametresPage() {
   }
 
   // Parallelize all remaining queries
-  const [{ data: entreprise }, { data: utilisateurs }, { data: objectifs }] = await Promise.all([
+  const [{ data: entreprise }, { data: utilisateurs }, { data: objectifs }, { data: equipes }] = await Promise.all([
     supabase
       .from('entreprises')
       .select('*')
@@ -70,6 +70,11 @@ export default async function ParametresPage() {
       .select('*')
       .eq('entreprise_id', utilisateur.entreprise_id)
       .order('annee', { ascending: false }),
+    supabase
+      .from('equipes')
+      .select('*, membres:membres_equipe(id, utilisateur:utilisateurs(id, nom, prenom, email, role))')
+      .eq('entreprise_id', utilisateur.entreprise_id)
+      .order('nom'),
   ])
 
   if (!entreprise) {
@@ -88,6 +93,7 @@ export default async function ParametresPage() {
       utilisateur={utilisateur}
       utilisateurs={utilisateurs || []}
       objectifs={objectifs || []}
+      equipes={(equipes || []) as never[]}
     />
   )
 }

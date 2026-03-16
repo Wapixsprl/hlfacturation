@@ -71,18 +71,21 @@ import {
   CreditCard,
   ScrollText,
   RefreshCw,
+  HardHat,
 } from 'lucide-react'
 import { PaiementTab } from './PaiementTab'
 import { RelancesTab } from './RelancesTab'
+import { EquipesTab, type EquipeData } from './EquipesTab'
 
 interface Props {
   entreprise: Entreprise
   utilisateur: Utilisateur
   utilisateurs: Utilisateur[]
   objectifs: ObjectifCA[]
+  equipes: EquipeData[]
 }
 
-export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, objectifs }: Props) {
+export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, objectifs, equipes }: Props) {
   return (
     <div>
       <h1 className="text-xl font-semibold text-[#141414] mb-6">Paramètres</h1>
@@ -125,6 +128,10 @@ export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, o
             <RefreshCw className="h-4 w-4" />
             Relances
           </TabsTrigger>
+          <TabsTrigger value="equipes">
+            <HardHat className="h-4 w-4" />
+            Équipes
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="entreprise">
@@ -161,6 +168,10 @@ export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, o
 
         <TabsContent value="relances">
           <RelancesTab entreprise={entreprise} />
+        </TabsContent>
+
+        <TabsContent value="equipes">
+          <EquipesTab equipes={equipes} utilisateurs={utilisateurs} />
         </TabsContent>
       </Tabs>
     </div>

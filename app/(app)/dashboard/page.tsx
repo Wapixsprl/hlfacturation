@@ -1,8 +1,53 @@
 import { createClient } from '@/lib/supabase/server'
 import { DashboardContent } from '@/components/dashboard/DashboardContent'
+import { OuvrierDashboard, type ChantierItem, type JournalEntry } from '@/components/dashboard/OuvrierDashboard'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
+
+  // Get current user and their profile
+  const { data: { user } } = await supabase.auth.getUser()
+
+  const { data: utilisateur } = user
+    ? await supabase
+        .from('utilisateurs')
+        .select('id, nom, prenom, role, entreprise_id')
+        .eq('id', user.id)
+        .single()
+    : { data: null }
+
+  // Check if ouvrier - show simplified dashboard
+  if (utilisateur?.role === 'ouvrier' && user) {
+    // Get equipes the ouvrier belongs to
+    const { data: memberships } = await supabase
+      .from('membres_equipe')
+      .select('equipe_id')
+      .eq('utilisateur_id', user.id)
+
+    const equipeIds = (memberships || []).map(m => m.equipe_id)
+
+    let mesChantiers: ChantierItem[] = []
+    if (equipeIds.length > 0) {
+      const { data } = await supabase
+        .from('chantiers')
+        .select('*, client:clients(nom, prenom, raison_sociale, type), equipe:equipes(id, nom, couleur)')
+        .in('equipe_id', equipeIds)
+        .in('statut', ['planifie', 'en_cours'])
+        .is('archived_at', null)
+        .order('date_debut', { ascending: true })
+      mesChantiers = (data || []) as ChantierItem[]
+    }
+
+    // Get recent journal entries by this ouvrier
+    const { data: mesEntrees } = await supabase
+      .from('journal_chantier')
+      .select('*, chantier:chantiers(numero, titre)')
+      .eq('auteur_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    return <OuvrierDashboard chantiers={mesChantiers} recentEntries={(mesEntrees || []) as JournalEntry[]} utilisateur={utilisateur} />
+  }
 
   const currentYear = new Date().getFullYear()
   const currentMonth = new Date().getMonth() // 0-indexed
