@@ -124,6 +124,9 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
   const [referenceChantier, setReferenceChantier] = useState(
     devis?.reference_chantier || ''
   )
+  const [adresseChantier, setAdresseChantier] = useState(
+    devis?.adresse_chantier || ''
+  )
   const [dateDevis, setDateDevis] = useState(
     devis?.date_devis || new Date().toISOString().split('T')[0]
   )
@@ -250,6 +253,7 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         client_id: clientId,
         titre: titre || null,
         reference_chantier: referenceChantier || null,
+        adresse_chantier: adresseChantier || null,
         date_devis: dateDevis,
         date_validite: dateValidite || null,
         conditions_paiement: conditionsPaiement || null,
@@ -516,6 +520,15 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
             <Input
               value={referenceChantier}
               onChange={(e) => setReferenceChantier(e.target.value)}
+              disabled={isReadOnly}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Adresse du chantier</Label>
+            <Input
+              value={adresseChantier}
+              onChange={(e) => setAdresseChantier(e.target.value)}
+              placeholder="Ex: Rue de la Loi 16, 7500 Tournai"
               disabled={isReadOnly}
             />
           </div>

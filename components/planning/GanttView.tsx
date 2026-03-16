@@ -343,7 +343,7 @@ export function GanttView({ chantiers, equipes }: GanttViewProps) {
             return (
               <div
                 key={`ch-${ch.id}`}
-                className="px-3 flex items-center border-b border-[#E2E8F0] hover:bg-gray-50 transition-colors"
+                className="px-3 flex flex-col justify-center border-b border-[#E2E8F0] hover:bg-gray-50 transition-colors"
                 style={{ height: ROW_HEIGHT }}
               >
                 <Link
@@ -353,6 +353,11 @@ export function GanttView({ chantiers, equipes }: GanttViewProps) {
                 >
                   {ch.titre}
                 </Link>
+                {ch.client && (
+                  <span className="text-[10px] text-gray-400 truncate">
+                    {getClientName(ch.client)}
+                  </span>
+                )}
               </div>
             )
           })}
@@ -461,12 +466,22 @@ export function GanttView({ chantiers, equipes }: GanttViewProps) {
                       }}
                     >
                       {barWidth > 60 && (
-                        <span
-                          className="text-[10px] font-semibold truncate"
-                          style={{ color: darkenHex(eqColor, 0.6) }}
-                        >
-                          {ch.titre}
-                        </span>
+                        <div className="truncate">
+                          <span
+                            className="text-[10px] font-semibold"
+                            style={{ color: darkenHex(eqColor, 0.6) }}
+                          >
+                            {ch.titre}
+                          </span>
+                          {barWidth > 140 && ch.client && (
+                            <span
+                              className="text-[9px] ml-1.5 opacity-70"
+                              style={{ color: darkenHex(eqColor, 0.6) }}
+                            >
+                              — {getClientName(ch.client)}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </Link>

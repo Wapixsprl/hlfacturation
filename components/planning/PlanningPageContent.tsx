@@ -513,13 +513,18 @@ function MonthView({ calendarWeeks, dayHeaders, currentDate, chantiersWithDates,
                         className="block"
                       >
                         <div
-                          className="rounded px-1.5 py-0.5 text-[10px] font-medium truncate hover:opacity-80 transition-opacity"
+                          className="rounded px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80 transition-opacity"
                           style={{
                             backgroundColor: hexToRgba(color, 0.2),
                             color: color,
                           }}
                         >
-                          {chantier.titre}
+                          <div className="truncate">{chantier.titre}</div>
+                          {chantier.client && (
+                            <div className="truncate opacity-70 font-normal" style={{ fontSize: '9px' }}>
+                              {getClientName(chantier.client)}
+                            </div>
+                          )}
                         </div>
                       </Link>
                     )

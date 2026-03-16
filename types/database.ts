@@ -213,6 +213,7 @@ export interface Devis {
   statut: 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire' | 'converti'
   titre: string | null
   reference_chantier: string | null
+  adresse_chantier: string | null
   date_devis: string
   date_validite: string | null
   conditions_paiement: string | null

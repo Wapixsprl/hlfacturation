@@ -542,6 +542,14 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
                 </Text>
               </View>
             )}
+            {devis.adresse_chantier && (
+              <View style={styles.metaRow}>
+                <Text style={styles.metaLabel}>Adresse chantier :</Text>
+                <Text style={styles.metaValue}>
+                  {devis.adresse_chantier}
+                </Text>
+              </View>
+            )}
             {devis.titre && (
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>Objet :</Text>
