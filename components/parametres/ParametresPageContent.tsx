@@ -554,7 +554,7 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
   const [showPassword, setShowPassword] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const maxUsers = 5
+  // Pas de limite d'utilisateurs
 
   const openAddDialog = () => {
     setEditingUser(null)
@@ -680,13 +680,12 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
             <div>
               <CardTitle>Utilisateurs</CardTitle>
               <CardDescription>
-                {utilisateurs.length}/{maxUsers} utilisateurs
+                {utilisateurs.length} utilisateur{utilisateurs.length > 1 ? 's' : ''}
               </CardDescription>
             </div>
             <Button
               onClick={openAddDialog}
               size="sm"
-              disabled={utilisateurs.length >= maxUsers}
             >
               <Plus className="h-4 w-4" />
               Ajouter

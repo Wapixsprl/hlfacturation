@@ -45,19 +45,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Acces refuse' }, { status: 403 })
   }
 
-  // Verifier la limite de 5 utilisateurs
-  const { count } = await supabase
-    .from('utilisateurs')
-    .select('id', { count: 'exact', head: true })
-    .eq('entreprise_id', currentUser.entreprise_id)
-
-  if (count !== null && count >= 5) {
-    return NextResponse.json(
-      { error: 'Limite de 5 utilisateurs atteinte' },
-      { status: 400 }
-    )
-  }
-
   const body = await request.json()
   const { nom, prenom, email, role } = body
 
