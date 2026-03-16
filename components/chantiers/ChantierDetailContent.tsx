@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { cn, formatDate, formatMontant } from '@/lib/utils'
@@ -45,6 +45,8 @@ import {
   Loader2,
   Receipt,
   ChevronRight,
+  ImagePlus,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Chantier, JournalChantier, TacheChantier, SousTraitantChantier, PvReception } from '@/types/database'
@@ -142,6 +144,9 @@ export function ChantierDetailContent({
   const [journalMeteo, setJournalMeteo] = useState<string>('')
   const [journalAvancement, setJournalAvancement] = useState<string>('')
   const [addingJournal, setAddingJournal] = useState(false)
+  const [journalPhotos, setJournalPhotos] = useState<string[]>([])
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Tache form
   const [newTacheTitre, setNewTacheTitre] = useState('')
@@ -170,8 +175,48 @@ export function ChantierDetailContent({
     }
   }
 
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setUploadingPhoto(true)
+
+    try {
+      const newUrls: string[] = []
+      for (const file of Array.from(files)) {
+        const ext = file.name.split('.').pop() || 'jpg'
+        const path = `${chantier.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from('chantiers')
+          .upload(path, file, { cacheControl: '3600', upsert: false })
+
+        if (uploadError) {
+          toast.error(`Erreur upload: ${uploadError.message}`)
+          continue
+        }
+
+        const { data: urlData } = supabase.storage.from('chantiers').getPublicUrl(path)
+        if (urlData?.publicUrl) {
+          newUrls.push(urlData.publicUrl)
+        }
+      }
+      if (newUrls.length > 0) {
+        setJournalPhotos(prev => [...prev, ...newUrls])
+        toast.success(`${newUrls.length} photo${newUrls.length > 1 ? 's' : ''} ajoutée${newUrls.length > 1 ? 's' : ''}`)
+      }
+    } catch {
+      toast.error('Erreur lors de l\'upload')
+    } finally {
+      setUploadingPhoto(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleRemovePhoto = (index: number) => {
+    setJournalPhotos(prev => prev.filter((_, i) => i !== index))
+  }
+
   const handleAddJournal = async () => {
-    if (!journalContenu.trim() && journalType !== 'avancement') return
+    if (!journalContenu.trim() && journalType !== 'avancement' && journalPhotos.length === 0) return
     setAddingJournal(true)
 
     const { error } = await supabase.from('journal_chantier').insert({
@@ -181,6 +226,7 @@ export function ChantierDetailContent({
       contenu: journalContenu.trim() || null,
       meteo: journalMeteo || null,
       avancement_pct: journalAvancement ? parseInt(journalAvancement) : null,
+      photos: journalPhotos.length > 0 ? journalPhotos : null,
     })
 
     setAddingJournal(false)
@@ -191,6 +237,7 @@ export function ChantierDetailContent({
       setJournalContenu('')
       setJournalMeteo('')
       setJournalAvancement('')
+      setJournalPhotos([])
       router.refresh()
     }
   }
@@ -565,6 +612,48 @@ export function ChantierDetailContent({
                   placeholder="Commentaire, observation, incident..."
                   rows={3}
                 />
+
+                {/* Photo upload */}
+                <div className="space-y-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handlePhotoUpload}
+                  />
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {journalPhotos.map((url, i) => (
+                      <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-[#E5E7EB] group">
+                        <img src={url} alt="" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoto(i)}
+                          className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingPhoto}
+                      className="w-16 h-16 rounded-lg border-2 border-dashed border-[#D1D5DB] hover:border-[#17C2D7] flex flex-col items-center justify-center text-[#9CA3AF] hover:text-[#17C2D7] transition-colors disabled:opacity-50"
+                    >
+                      {uploadingPhoto ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <>
+                          <ImagePlus className="h-5 w-5" />
+                          <span className="text-[9px] mt-0.5">Photos</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex justify-end">
                   <Button onClick={handleAddJournal} disabled={addingJournal} size="sm">
                     {addingJournal ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
