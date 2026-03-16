@@ -533,13 +533,9 @@ export function GanttView({ chantiers, equipes }: GanttViewProps) {
                 </>
               )}
             </div>
-            {tooltip.chantier.equipe && (
+            {tooltip.chantier.client && (
               <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-gray-700">
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: tooltip.chantier.equipe.couleur }}
-                />
-                <span className="text-gray-300">{tooltip.chantier.equipe.nom}</span>
+                <span className="text-gray-300">{getClientName(tooltip.chantier.client)}</span>
               </div>
             )}
             {/* Arrow */}
