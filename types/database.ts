@@ -369,6 +369,10 @@ export interface FactureAchat {
   total_ht: number
   total_tva: number
   total_ttc: number
+  remise_type: 'pct' | 'montant'
+  remise_pct: number
+  remise_montant: number
+  remise_libelle: string | null
   fichier_url: string | null
   notes: string | null
   nb_relances: number

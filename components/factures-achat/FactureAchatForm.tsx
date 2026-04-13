@@ -85,6 +85,17 @@ export function FactureAchatForm({
   const isEdit = !!factureAchat
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [remiseType, setRemiseType] = useState<'pct' | 'montant'>(
+    factureAchat?.remise_type || 'pct'
+  )
+  const [remiseValeur, setRemiseValeur] = useState(
+    factureAchat?.remise_type === 'montant'
+      ? (factureAchat?.remise_montant || 0)
+      : (factureAchat?.remise_pct || 0)
+  )
+  const [remiseLibelle, setRemiseLibelle] = useState(
+    factureAchat?.remise_libelle || ''
+  )
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(
     factureAchat?.fichier_url ? factureAchat.fichier_url.split('/').pop()?.replace(/^\d+_/, '') || 'Fichier' : null
   )
@@ -225,6 +236,11 @@ export function FactureAchatForm({
     setSaving(true)
 
     try {
+      const round = (n: number) => Math.round(n * 100) / 100
+      const remiseMontantCalc = remiseType === 'montant'
+        ? Math.min(remiseValeur, data.total_ht)
+        : round(data.total_ht * remiseValeur / 100)
+
       const factureData = {
         entreprise_id: utilisateur.entreprise_id,
         fournisseur_id: data.fournisseur_id,
@@ -236,6 +252,10 @@ export function FactureAchatForm({
         total_ht: data.total_ht,
         total_tva: data.total_tva,
         total_ttc: data.total_ttc,
+        remise_type: remiseType,
+        remise_pct: remiseType === 'pct' ? remiseValeur : 0,
+        remise_montant: remiseMontantCalc,
+        remise_libelle: remiseLibelle || null,
         fichier_url: data.fichier_url || null,
         notes: data.notes || null,
       }
@@ -503,6 +523,52 @@ export function FactureAchatForm({
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Remise */}
+          <div className="flex flex-col gap-1 pt-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground shrink-0">Remise (optionnel)</span>
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max={remiseType === 'pct' ? 100 : undefined}
+                  value={remiseValeur || ''}
+                  onChange={(e) => setRemiseValeur(parseFloat(e.target.value) || 0)}
+                  placeholder={remiseType === 'pct' ? '0 %' : '0 €'}
+                  className="h-8 w-24 rounded-md border border-input bg-transparent px-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setRemiseType(t => t === 'pct' ? 'montant' : 'pct'); setRemiseValeur(0) }}
+                  className="px-2 text-xs border rounded-md bg-muted hover:bg-muted/80 font-medium h-8"
+                >
+                  {remiseType === 'pct' ? '%' : '€'}
+                </button>
+              </div>
+              <input
+                type="text"
+                value={remiseLibelle}
+                onChange={(e) => setRemiseLibelle(e.target.value)}
+                placeholder="Libellé (ex: Remise fidélité)"
+                className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-sm text-muted-foreground"
+              />
+            </div>
+            {remiseValeur > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Remise déduite :{' '}
+                <span className="font-medium text-[#DC2626]">
+                  -{formatMontant(
+                    remiseType === 'montant'
+                      ? Math.min(remiseValeur, form.watch('total_ht') || 0)
+                      : Math.round((form.watch('total_ht') || 0) * remiseValeur) / 100
+                  )}
+                </span>
+                {' '}sur montant HT
+              </p>
+            )}
           </div>
 
           <div className="bg-gray-50 rounded-lg p-3 text-right">
