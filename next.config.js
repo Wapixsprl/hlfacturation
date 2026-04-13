@@ -4,7 +4,9 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
+    optimizePackageImports: ['lucide-react', 'recharts', '@react-pdf/renderer'],
   },
+  compress: true,
   devIndicators: false,
   images: {
     remotePatterns: [

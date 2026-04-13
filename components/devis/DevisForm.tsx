@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Devis, DevisLigne, Client, Produit, AcompteConfig } from '@/types/database'
-import { calculerLigne, calculerTotaux, formatMontant, isExonerationIntracom, MENTION_EXONERATION_INTRACOM } from '@/lib/utils'
+import { calculerLigne, calculerTotauxAvecRemiseGlobale, formatMontant, isExonerationIntracom, MENTION_EXONERATION_INTRACOM } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,7 +40,9 @@ interface LigneForm {
   quantite: number
   unite: string
   prix_unitaire_ht: number
+  remise_type: 'pct' | 'montant'
   remise_pct: number
+  remise_montant: number
   taux_tva: number
   total_ht: number
 }
@@ -62,7 +64,9 @@ function mapLigneFromDB(l: DevisLigne): LigneForm {
     quantite: l.quantite,
     unite: l.unite || 'piece',
     prix_unitaire_ht: l.prix_unitaire_ht,
+    remise_type: l.remise_type || 'pct',
     remise_pct: l.remise_pct,
+    remise_montant: l.remise_montant || 0,
     taux_tva: l.taux_tva,
     total_ht: l.total_ht,
   }
@@ -77,7 +81,9 @@ function createEmptyLigne(type: LigneForm['type'] = 'produit'): LigneForm {
     quantite: 1,
     unite: 'piece',
     prix_unitaire_ht: 0,
+    remise_type: 'pct',
     remise_pct: 0,
+    remise_montant: 0,
     taux_tva: 21,
     total_ht: 0,
   }
@@ -144,6 +150,19 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
     devis?.notes_internes || ''
   )
 
+  // --- Remise globale ---
+  const [remiseGlobaleType, setRemiseGlobaleType] = useState<'pct' | 'montant'>(
+    devis?.remise_globale_type || 'pct'
+  )
+  const [remiseGlobaleValeur, setRemiseGlobaleValeur] = useState(
+    devis?.remise_globale_type === 'montant'
+      ? (devis?.remise_globale_montant || 0)
+      : (devis?.remise_globale_pct || 0)
+  )
+  const [remiseGlobaleLibelle, setRemiseGlobaleLibelle] = useState(
+    devis?.remise_globale_libelle || ''
+  )
+
   // --- Acomptes state ---
   const [acomptes, setAcomptes] = useState<AcompteConfig[]>(
     (devis?.acomptes_config as AcompteConfig[]) || []
@@ -190,12 +209,8 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         const next = [...prev]
         const ligne = { ...next[index], ...updates }
         if (ligne.type === 'produit') {
-          const { ht } = calculerLigne(
-            ligne.quantite,
-            ligne.prix_unitaire_ht,
-            ligne.remise_pct,
-            ligne.taux_tva
-          )
+          const remise = ligne.remise_type === 'montant' ? ligne.remise_montant : ligne.remise_pct
+          const { ht } = calculerLigne(ligne.quantite, ligne.prix_unitaire_ht, remise, ligne.taux_tva, ligne.remise_type)
           ligne.total_ht = ht
         }
         next[index] = ligne
@@ -228,11 +243,10 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
 
   // --- Totals ---
   const produitLignes = lignes.filter((l) => l.type === 'produit')
-  const totaux = calculerTotaux(
-    produitLignes.map((l) => ({
-      total_ht: l.total_ht,
-      taux_tva: l.taux_tva,
-    }))
+  const totaux = calculerTotauxAvecRemiseGlobale(
+    produitLignes.map((l) => ({ total_ht: l.total_ht, taux_tva: l.taux_tva })),
+    remiseGlobaleType,
+    remiseGlobaleValeur
   )
 
   // --- Save ---
@@ -264,6 +278,10 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         total_ht: totaux.totalHT,
         total_tva: totaux.totalTVA,
         total_ttc: totaux.totalTTC,
+        remise_globale_type: remiseGlobaleType,
+        remise_globale_pct: remiseGlobaleType === 'pct' ? remiseGlobaleValeur : 0,
+        remise_globale_montant: remiseGlobaleType === 'montant' ? remiseGlobaleValeur : 0,
+        remise_globale_libelle: remiseGlobaleLibelle || null,
       }
 
       let devisId = devis?.id
@@ -327,7 +345,9 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         quantite: l.quantite,
         unite: l.unite,
         prix_unitaire_ht: l.prix_unitaire_ht,
+        remise_type: l.remise_type,
         remise_pct: l.remise_pct,
+        remise_montant: l.remise_montant,
         taux_tva: l.taux_tva,
         total_ht: l.total_ht,
       }))
@@ -632,6 +652,14 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
             </p>
           ) : (
             <div className="space-y-3">
+              {/* En-têtes colonnes */}
+              <div className="hidden md:grid md:grid-cols-6 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
+                <div className="col-span-2">Désignation</div>
+                <div>Qté</div>
+                <div>PU HT</div>
+                <div>Remise</div>
+                <div className="text-right">Total HT</div>
+              </div>
               {lignes.map((ligne, index) => {
                 // Compute section subtotal: show after last product before next section
                 let sectionSubtotal: number | null = null
@@ -795,22 +823,35 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                             disabled={isReadOnly}
                           />
                         </div>
-                        <div>
+                        <div className="flex gap-1">
                           <Input
                             type="number"
                             step="0.01"
                             min="0"
-                            max="100"
-                            value={ligne.remise_pct}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                remise_pct:
-                                  parseFloat(e.target.value) || 0,
-                              })
-                            }
-                            placeholder="Remise %"
+                            max={ligne.remise_type === 'pct' ? 100 : undefined}
+                            value={ligne.remise_type === 'montant' ? ligne.remise_montant : ligne.remise_pct}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0
+                              updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: val } : { remise_pct: val })
+                            }}
+                            placeholder={ligne.remise_type === 'pct' ? 'Remise %' : 'Remise €'}
                             disabled={isReadOnly}
+                            className="min-w-0"
                           />
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => updateLigne(index, {
+                                remise_type: ligne.remise_type === 'pct' ? 'montant' : 'pct',
+                                remise_pct: 0,
+                                remise_montant: 0,
+                              })}
+                              className="shrink-0 px-2 text-xs border rounded-md bg-muted hover:bg-muted/80 font-medium"
+                              title="Basculer % / €"
+                            >
+                              {ligne.remise_type === 'pct' ? '%' : '€'}
+                            </button>
+                          )}
                         </div>
                         <div className="flex items-center justify-end font-mono text-sm font-medium">
                           {formatMontant(ligne.total_ht)}
@@ -853,22 +894,63 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col items-end space-y-2">
+            {totaux.remiseMontant > 0 && (
+              <div className="flex justify-between w-64">
+                <span className="text-muted-foreground">Sous-total HT</span>
+                <span className="font-mono">{formatMontant(totaux.sousTotal)}</span>
+              </div>
+            )}
+            {/* Remise globale input */}
+            {!isReadOnly && (
+              <div className="flex flex-col gap-1 w-64">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-sm shrink-0">Remise globale</span>
+                  <div className="flex gap-1 flex-1">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={remiseGlobaleType === 'pct' ? 100 : undefined}
+                      value={remiseGlobaleValeur || ''}
+                      onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value) || 0)}
+                      placeholder={remiseGlobaleType === 'pct' ? '0 %' : '0 €'}
+                      className="h-7 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setRemiseGlobaleType(t => t === 'pct' ? 'montant' : 'pct'); setRemiseGlobaleValeur(0) }}
+                      className="shrink-0 px-2 text-xs border rounded-md bg-muted hover:bg-muted/80 font-medium h-7"
+                    >
+                      {remiseGlobaleType === 'pct' ? '%' : '€'}
+                    </button>
+                  </div>
+                </div>
+                <Input
+                  value={remiseGlobaleLibelle}
+                  onChange={(e) => setRemiseGlobaleLibelle(e.target.value)}
+                  placeholder="Libellé remise (ex: Remise fidélité)"
+                  className="h-7 text-xs text-muted-foreground"
+                />
+              </div>
+            )}
+            {totaux.remiseMontant > 0 && (
+              <div className="flex justify-between w-64 text-[#DC2626]">
+                <span>Remise</span>
+                <span className="font-mono">-{formatMontant(totaux.remiseMontant)}</span>
+              </div>
+            )}
             <div className="flex justify-between w-64">
               <span className="text-muted-foreground">Total HT</span>
               <span className="font-mono">{formatMontant(totaux.totalHT)}</span>
             </div>
             <div className="flex justify-between w-64">
               <span className="text-muted-foreground">TVA</span>
-              <span className="font-mono">
-                {formatMontant(totaux.totalTVA)}
-              </span>
+              <span className="font-mono">{formatMontant(totaux.totalTVA)}</span>
             </div>
             <Separator className="w-64" />
             <div className="flex justify-between w-64">
               <span className="font-semibold">Total TTC</span>
-              <span className="font-mono font-bold text-lg">
-                {formatMontant(totaux.totalTTC)}
-              </span>
+              <span className="font-mono font-bold text-lg">{formatMontant(totaux.totalTTC)}</span>
             </div>
           </div>
         </CardContent>

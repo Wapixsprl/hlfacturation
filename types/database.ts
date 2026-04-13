@@ -224,6 +224,10 @@ export interface Devis {
   total_ht: number
   total_tva: number
   total_ttc: number
+  remise_globale_type: 'pct' | 'montant'
+  remise_globale_pct: number
+  remise_globale_montant: number
+  remise_globale_libelle: string | null
   token_signature: string | null
   token_expiration: string | null
   signature_image: string | null
@@ -255,7 +259,9 @@ export interface DevisLigne {
   quantite: number
   unite: string | null
   prix_unitaire_ht: number
+  remise_type: 'pct' | 'montant'
   remise_pct: number
+  remise_montant: number
   taux_tva: number
   total_ht: number
   created_at: string
@@ -277,6 +283,10 @@ export interface Facture {
   total_ht: number
   total_tva: number
   total_ttc: number
+  remise_globale_type: 'pct' | 'montant'
+  remise_globale_pct: number
+  remise_globale_montant: number
+  remise_globale_libelle: string | null
   montant_acomptes_deduits: number
   solde_ttc: number
   pdf_url: string | null
@@ -304,7 +314,9 @@ export interface FactureLigne {
   quantite: number
   unite: string | null
   prix_unitaire_ht: number
+  remise_type: 'pct' | 'montant'
   remise_pct: number
+  remise_montant: number
   taux_tva: number
   total_ht: number
   created_at: string

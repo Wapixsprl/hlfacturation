@@ -31,24 +31,26 @@ export interface ResumeAnnuel {
 export default async function TresoreriePage() {
   const supabase = await createClient()
 
-  // 1. Fetch manual movements
-  const { data: mouvementsManuels } = await supabase
-    .from('mouvements_tresorerie')
-    .select('*')
-    .order('date_mouvement', { ascending: false })
-
-  // 2. Fetch paiements clients (encaissements) with facture info
-  const { data: paiementsClients } = await supabase
-    .from('paiements_clients')
-    .select('*, facture:factures(numero, client:clients(nom, prenom, raison_sociale, type))')
-    .order('date_paiement', { ascending: false })
-
-  // 3. Fetch echeances fournisseurs payees (decaissements) with facture_achat info
-  const { data: echeancesFournisseurs } = await supabase
-    .from('echeances_fournisseurs')
-    .select('*, facture_achat:factures_achat(entreprise_id, numero_fournisseur, fournisseur:fournisseurs(raison_sociale))')
-    .eq('statut', 'paye')
-    .order('date_paiement', { ascending: false })
+  // Vague 1 — 3 requêtes indépendantes en parallèle
+  const [
+    { data: mouvementsManuels },
+    { data: paiementsClients },
+    { data: echeancesFournisseurs },
+  ] = await Promise.all([
+    supabase
+      .from('mouvements_tresorerie')
+      .select('*')
+      .order('date_mouvement', { ascending: false }),
+    supabase
+      .from('paiements_clients')
+      .select('*, facture:factures(numero, client:clients(nom, prenom, raison_sociale, type))')
+      .order('date_paiement', { ascending: false }),
+    supabase
+      .from('echeances_fournisseurs')
+      .select('*, facture_achat:factures_achat(entreprise_id, numero_fournisseur, fournisseur:fournisseurs(raison_sociale))')
+      .eq('statut', 'paye')
+      .order('date_paiement', { ascending: false }),
+  ])
 
   // Build set of existing manual movement facture references to avoid duplicates
   const manualFactureIds = new Set(
@@ -139,26 +141,29 @@ export default async function TresoreriePage() {
   // --- Resume annuel financier ---
   const currentYear = new Date().getFullYear()
   const years = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3]
+  const oldestYear = years[years.length - 1]
 
-  // Fetch all factures (ventes)
-  const { data: factures } = await supabase
-    .from('factures')
-    .select('date_facture, statut, total_ht, total_tva, total_ttc, solde_ttc')
-    .neq('statut', 'brouillon')
-    .gte('date_facture', `${years[years.length - 1]}-01-01`)
-    .order('date_facture')
-
-  // Fetch all factures achat
-  const { data: facturesAchat } = await supabase
-    .from('factures_achat')
-    .select('id, date_facture, statut, total_ht, total_tva, total_ttc')
-    .gte('date_facture', `${years[years.length - 1]}-01-01`)
-    .order('date_facture')
-
-  // Fetch paid amounts for factures_achat to compute ouvert
-  const { data: echeancesFournAll } = await supabase
-    .from('echeances_fournisseurs')
-    .select('facture_achat_id, montant, statut')
+  // Vague 2 — 3 requêtes indépendantes en parallèle
+  const [
+    { data: factures },
+    { data: facturesAchat },
+    { data: echeancesFournAll },
+  ] = await Promise.all([
+    supabase
+      .from('factures')
+      .select('date_facture, statut, total_ht, total_tva, total_ttc, solde_ttc')
+      .neq('statut', 'brouillon')
+      .gte('date_facture', `${oldestYear}-01-01`)
+      .order('date_facture'),
+    supabase
+      .from('factures_achat')
+      .select('id, date_facture, statut, total_ht, total_tva, total_ttc')
+      .gte('date_facture', `${oldestYear}-01-01`)
+      .order('date_facture'),
+    supabase
+      .from('echeances_fournisseurs')
+      .select('facture_achat_id, montant, statut'),
+  ])
 
   // Build map of total paid per facture_achat
   const paidPerFactureAchat = new Map<string, number>()

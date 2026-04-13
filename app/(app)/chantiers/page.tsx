@@ -3,17 +3,18 @@ import { ChantiersPageContent } from '@/components/chantiers/ChantiersPageConten
 
 export default async function ChantiersPage() {
   const supabase = await createClient()
-  const { data: chantiers } = await supabase
-    .from('chantiers')
-    .select('*, client:clients(id, nom, prenom, raison_sociale, type), equipe:equipes(id, nom, couleur), devis:devis(id, numero, total_ht)')
-    .is('archived_at', null)
-    .order('created_at', { ascending: false })
-
-  const { data: equipes } = await supabase
-    .from('equipes')
-    .select('id, nom, couleur')
-    .eq('actif', true)
-    .order('nom')
+  const [{ data: chantiers }, { data: equipes }] = await Promise.all([
+    supabase
+      .from('chantiers')
+      .select('*, client:clients(id, nom, prenom, raison_sociale, type), equipe:equipes(id, nom, couleur), devis:devis(id, numero, total_ht)')
+      .is('archived_at', null)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('equipes')
+      .select('id, nom, couleur')
+      .eq('actif', true)
+      .order('nom'),
+  ])
 
   return <ChantiersPageContent initialChantiers={chantiers || []} equipes={equipes || []} />
 }

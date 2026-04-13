@@ -14,8 +14,17 @@ export const formatDate = (d: string | Date) =>
 export const formatDateLong = (d: string | Date) =>
   new Intl.DateTimeFormat('fr-BE', { dateStyle: 'long' }).format(new Date(d))
 
-export function calculerLigne(q: number, pu: number, remise: number, tva: number) {
-  const ht = q * pu * (1 - remise / 100)
+export function calculerLigne(
+  q: number,
+  pu: number,
+  remise: number,
+  tva: number,
+  remiseType: 'pct' | 'montant' = 'pct'
+) {
+  const brut = q * pu
+  const ht = remiseType === 'montant'
+    ? Math.max(0, brut - remise)
+    : brut * (1 - remise / 100)
   const tvaMontant = ht * (tva / 100)
   const round = (n: number) => Math.round(n * 100) / 100
   return { ht: round(ht), tva: round(tvaMontant), ttc: round(ht + tvaMontant) }
@@ -31,6 +40,28 @@ export function calculerTotaux(lignes: Array<{ total_ht: number; taux_tva: numbe
   const totalTVA = lignes.reduce((sum, l) => sum + l.total_ht * (l.taux_tva / 100), 0)
   const round = (n: number) => Math.round(n * 100) / 100
   return { totalHT: round(totalHT), totalTVA: round(totalTVA), totalTTC: round(totalHT + totalTVA) }
+}
+
+export function calculerTotauxAvecRemiseGlobale(
+  lignes: Array<{ total_ht: number; taux_tva: number }>,
+  remiseGlobaleType: 'pct' | 'montant',
+  remiseGlobaleValeur: number
+) {
+  const round = (n: number) => Math.round(n * 100) / 100
+  const sousTotal = lignes.reduce((sum, l) => sum + l.total_ht, 0)
+  const remiseMontant = remiseGlobaleType === 'montant'
+    ? Math.min(remiseGlobaleValeur, sousTotal)
+    : sousTotal * remiseGlobaleValeur / 100
+  const ratio = sousTotal > 0 ? (sousTotal - remiseMontant) / sousTotal : 1
+  const totalHT = sousTotal - remiseMontant
+  const totalTVA = lignes.reduce((sum, l) => sum + l.total_ht * (l.taux_tva / 100), 0) * ratio
+  return {
+    sousTotal: round(sousTotal),
+    remiseMontant: round(remiseMontant),
+    totalHT: round(totalHT),
+    totalTVA: round(totalTVA),
+    totalTTC: round(totalHT + totalTVA),
+  }
 }
 
 /**
