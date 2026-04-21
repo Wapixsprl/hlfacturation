@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     email,
   })
 
-  return NextResponse.json({ utilisateur: newUtilisateur, tempPassword }, { status: 201 })
+  return NextResponse.json({ utilisateur: newUtilisateur }, { status: 201 })
 }
 
 function generateTempPassword(): string {
