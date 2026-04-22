@@ -40,6 +40,9 @@ export default function LoginPage() {
       return
     }
 
+    // Enregistrer la connexion (derniere_connexion + log) — ne bloque pas la redirection
+    await fetch('/api/auth/connexion', { method: 'POST' }).catch(() => {})
+
     router.push('/dashboard')
     router.refresh()
   }
