@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { Toaster } from 'sonner'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
@@ -22,6 +23,19 @@ export default async function AppLayout({
     .select('*, entreprises(*)')
     .eq('id', user.id)
     .single()
+
+  // Mettre a jour derniere_connexion si null ou > 1h (fallback pour sessions deja actives)
+  if (utilisateur && (!utilisateur.derniere_connexion ||
+    new Date(utilisateur.derniere_connexion) < new Date(Date.now() - 60 * 60 * 1000))) {
+    const service = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    service.from('utilisateurs')
+      .update({ derniere_connexion: new Date().toISOString() })
+      .eq('id', user.id)
+      .then(() => {}, () => {})
+  }
 
   if (!utilisateur) {
     // Don't redirect to /login (causes infinite loop since user IS authenticated)
