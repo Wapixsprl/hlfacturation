@@ -5,7 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import { FacturePDF } from '@/lib/pdf/facture-template'
 import { envoyerFacture } from '@/lib/brevo/emails'
 import { formatMontant, getAppUrl } from '@/lib/utils'
-import { decryptApiKey, mollieWebhookSig } from '@/lib/payments/encryption'
+import { decryptApiKey, factureViewSig, mollieWebhookSig } from '@/lib/payments/encryption'
 import { getPaymentProvider } from '@/lib/payments/factory'
 import { randomUUID } from 'crypto'
 
@@ -212,8 +212,9 @@ export async function POST(
 
   // 11. Send email via Brevo
   const montantTTC = formatMontant(facture.total_ttc)
+  const viewUrl = `${getAppUrl()}/api/factures/${id}/voir?sig=${factureViewSig(id)}`
   try {
-    await envoyerFacture(clientEmail, clientNom, facture.numero, pdfUrl, montantTTC, id, paymentUrl)
+    await envoyerFacture(clientEmail, clientNom, facture.numero, pdfUrl, montantTTC, id, paymentUrl, viewUrl)
   } catch (emailError) {
     console.error('Brevo email error:', emailError)
     return NextResponse.json({

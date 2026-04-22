@@ -97,10 +97,11 @@ function devisEmailHtml(clientNom: string, numero: string, lienSignature: string
 </html>`
 }
 
-function factureEmailHtml(clientNom: string, numero: string, montantTTC: string, trackingUrl: string, paymentUrl?: string) {
+function factureEmailHtml(clientNom: string, numero: string, montantTTC: string, trackingUrl: string, viewUrl: string, paymentUrl?: string) {
   const paymentSection = paymentUrl ? `
+          <hr style="border:none;border-top:1px solid #ebebeb;margin:24px 0;" />
           <!-- Payment CTA -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 8px;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;">
             <tr><td align="center">
               <a href="${paymentUrl}" style="display:inline-block;background:#059669;color:#ffffff;text-decoration:none;padding:14px 40px;border-radius:999px;font-size:15px;font-weight:600;">
                 Payer ${montantTTC} en ligne
@@ -108,14 +109,13 @@ function factureEmailHtml(clientNom: string, numero: string, montantTTC: string,
             </td></tr>
           </table>
           <p style="margin:8px 0 0;color:#adadad;font-size:12px;line-height:1.5;text-align:center;">
-            Paiement securise par carte bancaire ou Bancontact
+            Paiement s&eacute;curis&eacute; par carte bancaire ou Bancontact
           </p>
-          <hr style="border:none;border-top:1px solid #ebebeb;margin:24px 0;" />
-          <p style="margin:0 0 0;color:#707070;font-size:13px;line-height:1.6;">
-            Vous pouvez egalement effectuer votre reglement par virement selon les conditions indiquees sur la facture.
+          <p style="margin:16px 0 0;color:#707070;font-size:13px;line-height:1.6;">
+            Vous pouvez &eacute;galement effectuer votre r&egrave;glement par virement selon les conditions indiqu&eacute;es sur la facture.
           </p>` : `
-          <p style="margin:0 0 0;color:#707070;font-size:14px;line-height:1.6;">
-            Merci de proceder au reglement selon les conditions indiquees sur la facture.
+          <p style="margin:16px 0 0;color:#707070;font-size:14px;line-height:1.6;">
+            Merci de proc&eacute;der au r&egrave;glement selon les conditions indiqu&eacute;es sur la facture.
           </p>`
 
   return `
@@ -128,30 +128,38 @@ function factureEmailHtml(clientNom: string, numero: string, montantTTC: string,
       <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;">
         <!-- Header -->
         <tr><td style="background:#141414;padding:28px 32px;">
-          <span style="color:#ffffff;font-size:18px;font-weight:600;letter-spacing:-0.01em;">HL Renovation</span>
+          <span style="color:#ffffff;font-size:18px;font-weight:600;letter-spacing:-0.01em;">HL R&eacute;novation</span>
         </td></tr>
         <!-- Body -->
         <tr><td style="padding:32px;">
           <p style="margin:0 0 20px;color:#141414;font-size:15px;line-height:1.6;">
             Bonjour${clientNom ? ' ' + clientNom : ''},
           </p>
-          <p style="margin:0 0 20px;color:#707070;font-size:14px;line-height:1.6;">
+          <p style="margin:0 0 24px;color:#707070;font-size:14px;line-height:1.6;">
             Veuillez trouver ci-joint votre facture <strong style="color:#141414;">${numero}</strong>
-            d'un montant de <strong style="color:#141414;">${montantTTC}</strong>.
+            d&apos;un montant de <strong style="color:#141414;">${montantTTC}</strong>.
           </p>
+          <!-- Voir la facture CTA -->
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr><td align="center">
+              <a href="${viewUrl}" style="display:inline-block;background:#141414;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:999px;font-size:14px;font-weight:600;">
+                Voir la facture
+              </a>
+            </td></tr>
+          </table>
           ${paymentSection}
         </td></tr>
         <!-- Footer -->
         <tr><td style="padding:20px 32px;border-top:1px solid #ebebeb;">
           <p style="margin:0;color:#adadad;font-size:11px;line-height:1.5;">
-            HL Renovation — Tournai, Belgique<br>
-            Cet email a ete envoye automatiquement depuis votre espace facturation.
+            HL R&eacute;novation &mdash; Tournai, Belgique<br>
+            Cet email a &eacute;t&eacute; envoy&eacute; automatiquement depuis votre espace facturation.
           </p>
         </td></tr>
       </table>
     </td></tr>
   </table>
-  <img src="${trackingUrl}" width="1" height="1" style="display:none;" alt="" />
+  <img src="${trackingUrl}" width="1" height="1" border="0" alt="" style="display:block;width:1px;height:1px;border:0;" />
 </body>
 </html>`
 }
@@ -168,14 +176,15 @@ export async function envoyerDevis(email: string, clientNom: string, numero: str
   })
 }
 
-export async function envoyerFacture(email: string, clientNom: string, numero: string, pdfUrl: string, montantTTC: string, factureId: string, paymentUrl?: string) {
+export async function envoyerFacture(email: string, clientNom: string, numero: string, pdfUrl: string, montantTTC: string, factureId: string, paymentUrl?: string, viewUrl?: string) {
   const trackingUrl = `${getAppUrl()}/api/factures/${factureId}/track`
+  const resolvedViewUrl = viewUrl || pdfUrl
 
   // Always use our HTML with tracking pixel — Brevo templates don't include it
   return sendEmail({
     to: [{ email, name: clientNom }],
     subject: `Facture ${numero} — HL Rénovation`,
-    htmlContent: factureEmailHtml(clientNom, numero, montantTTC, trackingUrl, paymentUrl),
+    htmlContent: factureEmailHtml(clientNom, numero, montantTTC, trackingUrl, resolvedViewUrl, paymentUrl),
     attachments: [{ name: `${numero}.pdf`, url: pdfUrl }],
   })
 }

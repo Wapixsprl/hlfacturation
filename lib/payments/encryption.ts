@@ -32,17 +32,23 @@ export function encryptApiKey(plaintext: string): string {
   return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted}`
 }
 
-/**
- * Genere une signature HMAC-SHA256 deterministe pour les webhooks Mollie.
- * Incluse comme ?sig=<valeur> dans l'URL webhook transmise a Mollie.
- */
-export function mollieWebhookSig(entrepriseId: string): string {
+function hmacSig(data: string): string {
   const key = process.env.PAYMENT_ENCRYPTION_KEY
   if (!key) throw new Error('PAYMENT_ENCRYPTION_KEY non definie')
   return createHmac('sha256', Buffer.from(key, 'hex'))
-    .update(entrepriseId)
+    .update(data)
     .digest('hex')
     .slice(0, 32)
+}
+
+/** Signature HMAC pour les webhooks Mollie (URL ?sig=). */
+export function mollieWebhookSig(entrepriseId: string): string {
+  return hmacSig(`mollie:${entrepriseId}`)
+}
+
+/** Signature HMAC pour les liens "Voir la facture" dans les emails. */
+export function factureViewSig(factureId: string): string {
+  return hmacSig(`view:${factureId}`)
 }
 
 /**
