@@ -27,20 +27,25 @@ export async function POST(request: NextRequest) {
   const userAgent = request.headers.get('user-agent') || null
   const now = new Date().toISOString()
 
-  await Promise.all([
-    serviceSupabase
-      .from('utilisateurs')
-      .update({ derniere_connexion: now, updated_at: now })
-      .eq('id', user.id),
-    serviceSupabase
+  // Mise a jour derniere_connexion (critique)
+  await serviceSupabase
+    .from('utilisateurs')
+    .update({ derniere_connexion: now, updated_at: now })
+    .eq('id', user.id)
+
+  // Log connexion (optionnel — peut echouer si migration 028 pas encore appliquee)
+  try {
+    await serviceSupabase
       .from('connexion_logs')
       .insert({
         utilisateur_id: user.id,
         entreprise_id: utilisateur.entreprise_id,
         ip,
         user_agent: userAgent,
-      }),
-  ])
+      })
+  } catch {
+    // Table connexion_logs absente — appliquer migration 028 dans Supabase
+  }
 
   return NextResponse.json({ success: true })
 }

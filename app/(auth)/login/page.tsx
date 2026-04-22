@@ -29,7 +29,7 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
@@ -40,8 +40,17 @@ export default function LoginPage() {
       return
     }
 
-    // Enregistrer la connexion (derniere_connexion + log) — ne bloque pas la redirection
-    await fetch('/api/auth/connexion', { method: 'POST' }).catch(() => {})
+    // Mise a jour directe via le client deja authentifie (RLS: user peut modifier sa propre ligne)
+    if (data.user) {
+      await supabase
+        .from('utilisateurs')
+        .update({ derniere_connexion: new Date().toISOString() })
+        .eq('id', data.user.id)
+        .then(() => {}, () => {})
+    }
+
+    // Log connexion (fire and forget — necessite migration 028)
+    fetch('/api/auth/connexion', { method: 'POST' }).catch(() => {})
 
     router.push('/dashboard')
     router.refresh()
