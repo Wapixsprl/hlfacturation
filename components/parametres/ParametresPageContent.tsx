@@ -88,6 +88,8 @@ interface Props {
 }
 
 export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, objectifs, equipes }: Props) {
+  const isSuperAdmin = utilisateur.role === 'super_admin'
+
   return (
     <div>
       <h1 className="text-xl font-semibold text-[#141414] mb-6">Paramètres</h1>
@@ -106,6 +108,12 @@ export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, o
             <Users className="h-4 w-4" />
             Utilisateurs
           </TabsTrigger>
+          {isSuperAdmin && (
+            <TabsTrigger value="droits">
+              <Shield className="h-4 w-4" />
+              Droits
+            </TabsTrigger>
+          )}
           <TabsTrigger value="numerotation">
             <Hash className="h-4 w-4" />
             Numérotation
@@ -147,6 +155,12 @@ export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, o
         <TabsContent value="utilisateurs">
           <UtilisateursTab utilisateur={utilisateur} utilisateurs={utilisateurs} />
         </TabsContent>
+
+        {isSuperAdmin && (
+          <TabsContent value="droits">
+            <RolePermissionsSection />
+          </TabsContent>
+        )}
 
         <TabsContent value="numerotation">
           <NumerotationTab entreprise={entreprise} />
@@ -548,7 +562,7 @@ const emptyForm: UserFormState = {
   confirmPassword: '',
 }
 
-function RolePermissionsSection({ utilisateur }: { utilisateur: Utilisateur }) {
+function RolePermissionsSection() {
   const [permissions, setPermissions] = useState<Record<string, Record<string, boolean>>>(DEFAULT_PERMISSIONS)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -583,8 +597,6 @@ function RolePermissionsSection({ utilisateur }: { utilisateur: Utilisateur }) {
     if (res.ok) { toast.success('Droits enregistrés'); setDirty(false) }
     else toast.error('Erreur lors de la sauvegarde')
   }
-
-  if (utilisateur.role !== 'super_admin') return null
 
   return (
     <Card>
@@ -882,8 +894,6 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
           </Table>
         </CardContent>
       </Card>
-
-      <RolePermissionsSection utilisateur={utilisateur} />
 
       {/* Dialog Ajouter / Modifier */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
