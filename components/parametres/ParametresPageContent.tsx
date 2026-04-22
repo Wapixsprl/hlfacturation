@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
@@ -72,7 +72,9 @@ import {
   ScrollText,
   RefreshCw,
   HardHat,
+  Shield,
 } from 'lucide-react'
+import { MANAGED_PAGES, MANAGED_ROLES, DEFAULT_PERMISSIONS } from '@/lib/auth/page-permissions'
 import { PaiementTab } from './PaiementTab'
 import { RelancesTab } from './RelancesTab'
 import { EquipesTab, type EquipeData } from './EquipesTab'
@@ -546,6 +548,102 @@ const emptyForm: UserFormState = {
   confirmPassword: '',
 }
 
+function RolePermissionsSection({ utilisateur }: { utilisateur: Utilisateur }) {
+  const [permissions, setPermissions] = useState<Record<string, Record<string, boolean>>>(DEFAULT_PERMISSIONS)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  const load = useCallback(async () => {
+    const res = await fetch('/api/parametres/permissions')
+    if (res.ok) {
+      const { permissions: p } = await res.json()
+      setPermissions(p)
+      setDirty(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const toggle = (role: string, page: string) => {
+    setPermissions(prev => ({
+      ...prev,
+      [role]: { ...prev[role], [page]: !prev[role]?.[page] },
+    }))
+    setDirty(true)
+  }
+
+  const save = async () => {
+    setSaving(true)
+    const res = await fetch('/api/parametres/permissions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions }),
+    })
+    setSaving(false)
+    if (res.ok) { toast.success('Droits enregistrés'); setDirty(false) }
+    else toast.error('Erreur lors de la sauvegarde')
+  }
+
+  if (utilisateur.role !== 'super_admin') return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-[#17C2D7]" />
+            <div>
+              <CardTitle>Droits d&apos;accès par profil</CardTitle>
+              <CardDescription>Cochez les pages visibles pour chaque rôle</CardDescription>
+            </div>
+          </div>
+          <Button size="sm" onClick={save} disabled={saving || !dirty}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+            Enregistrer
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className="text-left font-medium text-[#6B7280] pb-3 pr-4 min-w-[120px]">Profil</th>
+                {MANAGED_PAGES.map(p => (
+                  <th key={p.key} className="text-center font-medium text-[#6B7280] pb-3 px-2 min-w-[80px]">
+                    <span className="text-xs">{p.label}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F3F4F6]">
+              {MANAGED_ROLES.map(role => (
+                <tr key={role.key} className="hover:bg-[#F9FAFB]">
+                  <td className="py-3 pr-4 font-medium text-[#374151]">{role.label}</td>
+                  {MANAGED_PAGES.map(page => (
+                    <td key={page.key} className="py-3 px-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={permissions[role.key]?.[page.key] ?? false}
+                        onChange={() => toggle(role.key, page.key)}
+                        className="h-4 w-4 rounded border-[#D1D5DB] text-[#17C2D7] accent-[#17C2D7] cursor-pointer"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-[#9CA3AF] mt-4">
+          Le profil <strong>Super Admin</strong> a toujours accès à toutes les pages.
+          Les modifications prennent effet à la prochaine navigation de l&apos;utilisateur.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { utilisateur: Utilisateur; utilisateurs: Utilisateur[] }) {
   const [utilisateurs, setUtilisateurs] = useState<Utilisateur[]>(initialUtilisateurs)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -784,6 +882,8 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
           </Table>
         </CardContent>
       </Card>
+
+      <RolePermissionsSection utilisateur={utilisateur} />
 
       {/* Dialog Ajouter / Modifier */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -44,31 +44,40 @@ interface SidebarProps {
     role: string
     entreprises: { nom: string; logo_url: string | null } | null
   }
+  pageAccess?: string[]
 }
 
 const allNavigation = [
-  { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard, roles: null },
-  { name: 'Clients', href: '/clients', icon: Users, roles: ['super_admin', 'utilisateur', 'comptable'] },
-  { name: 'Produits', href: '/produits', icon: Package, roles: ['super_admin', 'utilisateur'] },
-  { name: 'Devis', href: '/devis', icon: FileText, roles: ['super_admin', 'utilisateur', 'comptable'] },
-  { name: 'Factures', href: '/factures', icon: Receipt, roles: ['super_admin', 'comptable'] },
-  { name: 'Chantiers', href: '/chantiers', icon: HardHat, roles: ['super_admin', 'utilisateur', 'ouvrier', 'resp_equipe'] },
-  { name: 'Planning', href: '/planning', icon: CalendarDays, roles: ['super_admin', 'utilisateur', 'ouvrier', 'equipe', 'resp_equipe'] },
-  { name: 'Fournisseurs', href: '/fournisseurs', icon: Truck, roles: ['super_admin', 'utilisateur', 'comptable'] },
-  { name: 'Achats', href: '/factures-achat', icon: ShoppingCart, roles: ['super_admin', 'comptable'] },
-  { name: 'Tresorerie', href: '/tresorerie', icon: Wallet, roles: ['super_admin', 'comptable'] },
-  { name: 'Parametres', href: '/parametres', icon: Settings, roles: ['super_admin'] },
+  { key: 'dashboard',    name: 'Tableau de bord', href: '/dashboard',       icon: LayoutDashboard, roles: null },
+  { key: 'clients',      name: 'Clients',          href: '/clients',         icon: Users,           roles: ['super_admin', 'utilisateur', 'comptable'] },
+  { key: 'produits',     name: 'Produits',          href: '/produits',        icon: Package,         roles: ['super_admin', 'utilisateur'] },
+  { key: 'devis',        name: 'Devis',             href: '/devis',           icon: FileText,        roles: ['super_admin', 'utilisateur', 'comptable'] },
+  { key: 'factures',     name: 'Factures',          href: '/factures',        icon: Receipt,         roles: ['super_admin', 'comptable'] },
+  { key: 'chantiers',    name: 'Chantiers',         href: '/chantiers',       icon: HardHat,         roles: ['super_admin', 'utilisateur', 'ouvrier', 'resp_equipe'] },
+  { key: 'planning',     name: 'Planning',          href: '/planning',        icon: CalendarDays,    roles: ['super_admin', 'utilisateur', 'ouvrier', 'equipe', 'resp_equipe'] },
+  { key: 'fournisseurs', name: 'Fournisseurs',      href: '/fournisseurs',    icon: Truck,           roles: ['super_admin', 'utilisateur', 'comptable'] },
+  { key: 'achats',       name: 'Achats',            href: '/factures-achat',  icon: ShoppingCart,    roles: ['super_admin', 'comptable'] },
+  { key: 'tresorerie',   name: 'Tresorerie',        href: '/tresorerie',      icon: Wallet,          roles: ['super_admin', 'comptable'] },
+  { key: 'parametres',   name: 'Parametres',        href: '/parametres',      icon: Settings,        roles: ['super_admin'] },
 ]
 
-function getNavigation(role: string) {
-  return allNavigation.filter(item => item.roles === null || item.roles.includes(role))
+function getNavigation(role: string, pageAccess?: string[]) {
+  return allNavigation.filter(item => {
+    // Filtre par rôle (logique existante)
+    if (item.roles !== null && !item.roles.includes(role)) return false
+    // Filtre dynamique pour les non-super_admin (pas de filtre sur 'parametres')
+    if (role !== 'super_admin' && pageAccess && item.key !== 'parametres') {
+      return pageAccess.includes(item.key)
+    }
+    return true
+  })
 }
 
-function SidebarContent({ utilisateur, onNavigate, collapsed = false, onToggle }: SidebarProps & { onNavigate?: () => void; collapsed?: boolean; onToggle?: () => void }) {
+function SidebarContent({ utilisateur, pageAccess, onNavigate, collapsed = false, onToggle }: SidebarProps & { onNavigate?: () => void; collapsed?: boolean; onToggle?: () => void }) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
-  const navigation = getNavigation(utilisateur.role)
+  const navigation = getNavigation(utilisateur.role, pageAccess)
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -239,7 +248,7 @@ function SidebarContent({ utilisateur, onNavigate, collapsed = false, onToggle }
   )
 }
 
-export function Sidebar({ utilisateur }: SidebarProps) {
+export function Sidebar({ utilisateur, pageAccess }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { collapsed, toggle } = useSidebarState()
 
@@ -250,7 +259,7 @@ export function Sidebar({ utilisateur }: SidebarProps) {
         "hidden lg:fixed lg:inset-y-0 lg:flex lg:flex-col transition-all duration-200 z-30",
         collapsed ? "lg:w-[64px]" : "lg:w-[240px]"
       )}>
-        <SidebarContent utilisateur={utilisateur} collapsed={collapsed} onToggle={toggle} />
+        <SidebarContent utilisateur={utilisateur} pageAccess={pageAccess} collapsed={collapsed} onToggle={toggle} />
       </div>
 
       {/* Mobile hamburger button */}
@@ -260,7 +269,7 @@ export function Sidebar({ utilisateur }: SidebarProps) {
             <Menu className="h-5 w-5 text-[#374151]" />
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-[240px] border-r-0">
-            <SidebarContent utilisateur={utilisateur} onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent utilisateur={utilisateur} pageAccess={pageAccess} onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
         </Sheet>
       </div>

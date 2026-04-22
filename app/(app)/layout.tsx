@@ -5,6 +5,7 @@ import { Toaster } from 'sonner'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
 import { MainContent } from '@/components/layout/MainContent'
+import { DEFAULT_PERMISSIONS } from '@/lib/auth/page-permissions'
 
 export default async function AppLayout({
   children,
@@ -24,17 +25,36 @@ export default async function AppLayout({
     .eq('id', user.id)
     .single()
 
+  const service = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
   // Mettre a jour derniere_connexion si null ou > 1h (fallback pour sessions deja actives)
   if (utilisateur && (!utilisateur.derniere_connexion ||
     new Date(utilisateur.derniere_connexion) < new Date(Date.now() - 60 * 60 * 1000))) {
-    const service = createServiceClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
     service.from('utilisateurs')
       .update({ derniere_connexion: new Date().toISOString() })
       .eq('id', user.id)
       .then(() => {}, () => {})
+  }
+
+  // Calcul pageAccess pour les non-super_admin
+  let pageAccess: string[] | undefined
+  if (utilisateur && utilisateur.role !== 'super_admin') {
+    const { data: permRows } = await service
+      .from('role_page_permissions')
+      .select('page, actif')
+      .eq('entreprise_id', utilisateur.entreprise_id)
+      .eq('role', utilisateur.role)
+
+    if (permRows && permRows.length > 0) {
+      pageAccess = permRows.filter(r => r.actif).map(r => r.page)
+    } else {
+      // Defaults si pas encore configuré
+      const defaults = DEFAULT_PERMISSIONS[utilisateur.role] || {}
+      pageAccess = Object.entries(defaults).filter(([, v]) => v).map(([k]) => k)
+    }
   }
 
   if (!utilisateur) {
@@ -59,7 +79,7 @@ export default async function AppLayout({
 
   return (
     <div className="min-h-screen bg-[#F9FAFB]">
-      <Sidebar utilisateur={utilisateur} />
+      <Sidebar utilisateur={utilisateur} pageAccess={pageAccess} />
       <MainContent>
         <Header utilisateur={utilisateur} />
         <main className="px-5 sm:px-8 py-6 max-w-7xl mx-auto">
