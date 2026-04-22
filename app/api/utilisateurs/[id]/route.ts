@@ -35,7 +35,30 @@ export async function PUT(
   }
 
   const body = await request.json()
-  const { nom, prenom, role, actif } = body
+  const { nom, prenom, role, actif, email, newPassword } = body
+
+  // Changement email ou mot de passe via Supabase Auth Admin
+  if (email || newPassword) {
+    const adminSupabase = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const authUpdate: { email?: string; password?: string } = {}
+    if (email && typeof email === 'string') authUpdate.email = email.trim().toLowerCase()
+    if (newPassword && typeof newPassword === 'string') {
+      if (newPassword.length < 8) {
+        return NextResponse.json({ error: 'Mot de passe trop court (8 caractères minimum)' }, { status: 400 })
+      }
+      authUpdate.password = newPassword
+    }
+    const { error: authError } = await adminSupabase.auth.admin.updateUserById(id, authUpdate)
+    if (authError) return NextResponse.json({ error: authError.message }, { status: 400 })
+
+    // Mettre à jour l'email dans la table utilisateurs aussi
+    if (email) {
+      await adminSupabase.from('utilisateurs').update({ email: email.trim().toLowerCase(), updated_at: new Date().toISOString() }).eq('id', id)
+    }
+  }
 
   const updateData: Record<string, unknown> = {
     updated_at: new Date().toISOString(),

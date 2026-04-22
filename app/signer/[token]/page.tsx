@@ -20,6 +20,9 @@ export default async function SignatureDevisPage({ params }: { params: Promise<{
 
   if (!devis) notFound()
 
+  // Incrémenter les vues à chaque visite (même si le pixel email est bloqué par le client mail)
+  await supabase.rpc('increment_email_ouvertures', { p_devis_id: devis.id })
+
   // Check if already signed
   if (devis.signature_image) {
     return (

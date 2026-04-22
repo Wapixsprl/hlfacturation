@@ -533,6 +533,8 @@ interface UserFormState {
   prenom: string
   email: string
   role: 'super_admin' | 'utilisateur' | 'comptable' | 'ouvrier' | 'equipe' | 'resp_equipe'
+  newPassword: string
+  confirmPassword: string
 }
 
 const emptyForm: UserFormState = {
@@ -540,6 +542,8 @@ const emptyForm: UserFormState = {
   prenom: '',
   email: '',
   role: 'utilisateur',
+  newPassword: '',
+  confirmPassword: '',
 }
 
 function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { utilisateur: Utilisateur; utilisateurs: Utilisateur[] }) {
@@ -570,6 +574,8 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
       prenom: u.prenom || '',
       email: u.email,
       role: u.role,
+      newPassword: '',
+      confirmPassword: '',
     })
     setTempPassword(null)
     setDialogOpen(true)
@@ -586,15 +592,19 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
 
     try {
       if (editingUser) {
+        if (form.newPassword && form.newPassword !== form.confirmPassword) {
+          toast.error('Les mots de passe ne correspondent pas')
+          setLoading(false)
+          return
+        }
+        const payload: Record<string, string> = { nom: form.nom, prenom: form.prenom, role: form.role }
+        if (form.email !== editingUser.email) payload.email = form.email
+        if (form.newPassword) payload.newPassword = form.newPassword
         // Modifier
         const res = await fetch(`/api/utilisateurs/${editingUser.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            nom: form.nom,
-            prenom: form.prenom,
-            role: form.role,
-          }),
+          body: JSON.stringify(payload),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Erreur')
@@ -858,11 +868,7 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
                   onChange={(e) => setForm(prev => ({ ...prev, email: e.target.value }))}
                   placeholder="email@exemple.com"
                   required
-                  disabled={!!editingUser}
                 />
-                {editingUser && (
-                  <p className="text-xs text-[#9CA3AF]">L&apos;email ne peut pas etre modifie.</p>
-                )}
               </div>
 
               <div className="space-y-1.5">
@@ -889,6 +895,34 @@ function UtilisateursTab({ utilisateur, utilisateurs: initialUtilisateurs }: { u
                   {form.role === 'resp_equipe' && 'Acces aux chantiers et planning. Peut gerer et organiser les chantiers.'}
                 </p>
               </div>
+
+              {editingUser && (
+                <div className="space-y-3 border-t pt-4">
+                  <p className="text-xs font-medium text-[#6B7280] uppercase tracking-wide">Changer le mot de passe</p>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="user-newpwd">Nouveau mot de passe</Label>
+                    <Input
+                      id="user-newpwd"
+                      type="password"
+                      value={form.newPassword}
+                      onChange={(e) => setForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                      placeholder="Laisser vide pour ne pas changer"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="user-confirmpwd">Confirmer le mot de passe</Label>
+                    <Input
+                      id="user-confirmpwd"
+                      type="password"
+                      value={form.confirmPassword}
+                      onChange={(e) => setForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      placeholder="Répéter le mot de passe"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </div>
+              )}
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
