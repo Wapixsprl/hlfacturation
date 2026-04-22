@@ -5,7 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import { FacturePDF } from '@/lib/pdf/facture-template'
 import { envoyerFacture } from '@/lib/brevo/emails'
 import { formatMontant, getAppUrl } from '@/lib/utils'
-import { decryptApiKey } from '@/lib/payments/encryption'
+import { decryptApiKey, mollieWebhookSig } from '@/lib/payments/encryption'
 import { getPaymentProvider } from '@/lib/payments/factory'
 import { randomUUID } from 'crypto'
 
@@ -179,7 +179,9 @@ export async function POST(
               amount: soldeRestant,
               description: `Facture ${facture.numero}`,
               redirectUrl: `${appUrl}/payer/${token}/retour`,
-              webhookUrl: `${appUrl}/api/webhooks/${provider}`,
+              webhookUrl: provider === 'mollie'
+                ? `${appUrl}/api/webhooks/mollie?sig=${mollieWebhookSig(entreprise.id)}`
+                : `${appUrl}/api/webhooks/stripe`,
               metadata: {
                 facture_id: id,
                 entreprise_id: entreprise.id,

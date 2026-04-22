@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { MollieProvider } from '@/lib/payments/mollie'
-import { decryptApiKey } from '@/lib/payments/encryption'
+import { decryptApiKey, mollieWebhookSig } from '@/lib/payments/encryption'
 import { recordPaymentAndUpdateInvoice, updateSessionStatus } from '../shared'
 
 export async function POST(request: NextRequest) {
@@ -36,8 +36,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
-    // Recuperer la cle API Mollie pour verifier le statut
+    // Verifier la signature HMAC dans l'URL
+    const sig = request.nextUrl.searchParams.get('sig')
     const entreprise = session.facture as { entreprise_id: string }
+    const expectedSig = mollieWebhookSig(entreprise.entreprise_id)
+    if (!sig || sig !== expectedSig) {
+      console.error('[mollie webhook] Signature invalide')
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    }
+
+    // Recuperer la cle API Mollie pour verifier le statut
     const { data: ent } = await serviceSupabase
       .from('entreprises')
       .select('mollie_api_key_encrypted')

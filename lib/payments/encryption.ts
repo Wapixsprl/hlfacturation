@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'crypto'
 
 const ALGORITHM = 'aes-256-gcm'
 const IV_LENGTH = 16
@@ -30,6 +30,19 @@ export function encryptApiKey(plaintext: string): string {
   const tag = cipher.getAuthTag()
 
   return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted}`
+}
+
+/**
+ * Genere une signature HMAC-SHA256 deterministe pour les webhooks Mollie.
+ * Incluse comme ?sig=<valeur> dans l'URL webhook transmise a Mollie.
+ */
+export function mollieWebhookSig(entrepriseId: string): string {
+  const key = process.env.PAYMENT_ENCRYPTION_KEY
+  if (!key) throw new Error('PAYMENT_ENCRYPTION_KEY non definie')
+  return createHmac('sha256', Buffer.from(key, 'hex'))
+    .update(entrepriseId)
+    .digest('hex')
+    .slice(0, 32)
 }
 
 /**

@@ -24,6 +24,9 @@ export default async function PaymentPage({
 
   if (!session) notFound()
 
+  // Incrémenter les vues à chaque visite (même si le pixel email est bloqué par le client mail)
+  await supabase.rpc('increment_facture_email_ouvertures', { p_facture_id: session.facture_id })
+
   // Recuperer facture + client + entreprise
   const [{ data: facture }, { data: entreprise }] = await Promise.all([
     supabase
