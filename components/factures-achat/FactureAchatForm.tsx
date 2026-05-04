@@ -241,9 +241,20 @@ export function FactureAchatForm({
         ? Math.min(remiseValeur, data.total_ht)
         : round(data.total_ht * remiseValeur / 100)
 
+      // Calcul statut parent basé sur les échéances
+      const statutFromEcheances = (() => {
+        if (data.echeances.length === 0) return 'a_payer'
+        const statuts = data.echeances.map((e) => e.statut)
+        if (statuts.every((s) => s === 'paye')) return 'paye'
+        if (statuts.some((s) => s === 'paye')) return 'partiellement_paye'
+        if (statuts.every((s) => s === 'en_retard')) return 'en_retard'
+        return 'a_payer'
+      })()
+
       const factureData = {
         entreprise_id: utilisateur.entreprise_id,
         fournisseur_id: data.fournisseur_id,
+        statut: statutFromEcheances,
         numero_fournisseur: data.numero_fournisseur || null,
         date_facture: data.date_facture,
         designation: data.designation || null,
