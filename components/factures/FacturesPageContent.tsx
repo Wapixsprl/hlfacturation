@@ -83,14 +83,24 @@ const statutConfig: Record<string, { label: string; className: string }> = {
 type FactureWithClient = Facture & {
   client: Pick<Client, 'nom' | 'prenom' | 'raison_sociale' | 'type'> | null
   total_paye?: number
+  taux_tva_list?: number[]
 }
 
 interface Props {
   initialFactures: FactureWithClient[]
+  initialTvaMap?: Record<string, number[]>
 }
 
-export function FacturesPageContent({ initialFactures }: Props) {
+const TVA_BADGE: Record<number, string> = {
+  0:  'bg-[#F3F4F6] text-[#6B7280]',
+  6:  'bg-[#D1FAE5] text-[#059669]',
+  12: 'bg-[#FEF3C7] text-[#D97706]',
+  21: 'bg-[#DBEAFE] text-[#1D4ED8]',
+}
+
+export function FacturesPageContent({ initialFactures, initialTvaMap = {} }: Props) {
   const [facturesList, setFacturesList] = useState(initialFactures)
+  const [tvaMap] = useState<Record<string, number[]>>(initialTvaMap)
   const [search, setSearch] = useState('')
   const [statutFilter, setStatutFilter] = useState('tous')
   const [typeFilter, setTypeFilter] = useState('tous')
@@ -196,15 +206,21 @@ export function FacturesPageContent({ initialFactures }: Props) {
     if (data) {
       const ids = data.map((f: FactureWithClient) => f.id)
       if (ids.length > 0) {
-        const { data: paiements } = await supabase
-          .from('paiements_clients')
-          .select('facture_id, montant')
-          .in('facture_id', ids)
+        const [{ data: paiements }] = await Promise.all([
+          supabase
+            .from('paiements_clients')
+            .select('facture_id, montant')
+            .in('facture_id', ids),
+        ])
         const paiementMap: Record<string, number> = {}
         for (const p of paiements || []) {
           paiementMap[p.facture_id] = (paiementMap[p.facture_id] || 0) + p.montant
         }
-        setFacturesList(data.map((f: FactureWithClient) => ({ ...f, total_paye: paiementMap[f.id] || 0 })))
+        setFacturesList(data.map((f: FactureWithClient) => ({
+          ...f,
+          total_paye: paiementMap[f.id] || 0,
+          taux_tva_list: tvaMap[f.id] || [],
+        })))
       } else {
         setFacturesList([])
       }
@@ -234,6 +250,7 @@ export function FacturesPageContent({ initialFactures }: Props) {
     { key: 'client', getValue: (f) => getClientName(f), sortType: 'string' as const },
     { key: 'date', getValue: (f) => f.date_facture, sortType: 'date' as const },
     { key: 'echeance', getValue: (f) => f.date_echeance || '', sortType: 'date' as const },
+    { key: 'tva', getValue: (f) => (f.taux_tva_list || []).map((t) => `${t}%`).join(', '), sortType: 'string' as const },
     { key: 'montant_ttc', getValue: (f) => f.total_ttc, sortType: 'number' as const },
     { key: 'reste', getValue: (f) => getRestePayer(f), sortType: 'number' as const },
     { key: 'statut', getValue: (f) => statutConfig[f.statut]?.label || f.statut, sortType: 'string' as const },
@@ -401,6 +418,7 @@ export function FacturesPageContent({ initialFactures }: Props) {
                 <SortableTableHead label="Client" columnKey="client" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['client'] || ''} onFilterChange={setColumnFilter} />
                 <SortableTableHead label="Date" columnKey="date" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['date'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <SortableTableHead label="Echeance" columnKey="echeance" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['echeance'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
+                <SortableTableHead label="TVA" columnKey="tva" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['tva'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <SortableTableHead label="Montant TTC" columnKey="montant_ttc" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['montant_ttc'] || ''} onFilterChange={setColumnFilter} align="right" />
                 <SortableTableHead label="Reste a payer" columnKey="reste" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['reste'] || ''} onFilterChange={setColumnFilter} align="right" className="hidden md:table-cell" />
                 <SortableTableHead label="Statut" columnKey="statut" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['statut'] || ''} onFilterChange={setColumnFilter} />
@@ -437,6 +455,22 @@ export function FacturesPageContent({ initialFactures }: Props) {
                     </TableCell>
                     <TableCell className={`hidden md:table-cell ${getEcheanceColor(f)}`}>
                       {f.date_echeance ? formatDate(f.date_echeance) : '\u2014'}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {(f.taux_tva_list || []).length === 0 ? (
+                          <span className="text-[#D1D5DB]">&mdash;</span>
+                        ) : (
+                          (f.taux_tva_list || []).map((taux) => (
+                            <span
+                              key={taux}
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold ${TVA_BADGE[taux] ?? 'bg-[#F3F4F6] text-[#6B7280]'}`}
+                            >
+                              {taux}%
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right font-semibold tabular-nums text-[#111827]">
                       {formatMontant(f.total_ttc)}

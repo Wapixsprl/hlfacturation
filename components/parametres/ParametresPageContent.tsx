@@ -78,6 +78,7 @@ import { MANAGED_PAGES, MANAGED_ROLES, DEFAULT_PERMISSIONS } from '@/lib/auth/pa
 import { PaiementTab } from './PaiementTab'
 import { RelancesTab } from './RelancesTab'
 import { EquipesTab, type EquipeData } from './EquipesTab'
+import { ImportTab } from './ImportTab'
 
 interface Props {
   entreprise: Entreprise
@@ -142,6 +143,12 @@ export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, o
             <HardHat className="h-4 w-4" />
             Équipes
           </TabsTrigger>
+          {isSuperAdmin && (
+            <TabsTrigger value="import">
+              <Upload className="h-4 w-4" />
+              Import
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="entreprise">
@@ -189,6 +196,12 @@ export function ParametresPageContent({ entreprise, utilisateur, utilisateurs, o
         <TabsContent value="equipes">
           <EquipesTab equipes={equipes} utilisateurs={utilisateurs} />
         </TabsContent>
+
+        {isSuperAdmin && (
+          <TabsContent value="import">
+            <ImportTab />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )
@@ -1290,9 +1303,30 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
   const [prefixeDevis, setPrefixeDevis] = useState(entreprise.prefixe_devis || 'DEV')
   const [prefixeFacture, setPrefixeFacture] = useState(entreprise.prefixe_facture || 'FAC')
   const [prefixeAvoir, setPrefixeAvoir] = useState(entreprise.prefixe_avoir || 'AVO')
+  const [prochainDevis, setProchainDevis] = useState(1)
+  const [prochainFacture, setProchainFacture] = useState(1)
+  const [prochainAvoir, setProchainAvoir] = useState(1)
+  const [seqLoaded, setSeqLoaded] = useState(false)
+  const [origProchain, setOrigProchain] = useState({ devis: 1, facture: 1, avoir: 1 })
   const supabase = createClient()
 
   const currentYear = new Date().getFullYear()
+
+  useEffect(() => {
+    fetch('/api/sequences')
+      .then((r) => r.json())
+      .then((data) => {
+        setProchainDevis(data.devis.prochain)
+        setProchainFacture(data.facture.prochain)
+        setProchainAvoir(data.avoir.prochain)
+        setOrigProchain({ devis: data.devis.prochain, facture: data.facture.prochain, avoir: data.avoir.prochain })
+        setSeqLoaded(true)
+      })
+      .catch(() => setSeqLoaded(true))
+  }, [])
+
+  const formatPreview = (prefix: string, num: number) =>
+    `${prefix || '...'}-${currentYear}-${String(num).padStart(4, '0')}`
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1302,16 +1336,20 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
       return
     }
 
-    // Validate: only uppercase letters, numbers, hyphens
     const regex = /^[A-Z0-9-]+$/
     if (!regex.test(prefixeDevis) || !regex.test(prefixeFacture) || !regex.test(prefixeAvoir)) {
       toast.error('Les prefixes ne peuvent contenir que des lettres majuscules, chiffres et tirets')
       return
     }
 
+    if (prochainDevis < 1 || prochainFacture < 1 || prochainAvoir < 1) {
+      toast.error('Le prochain numéro doit être au moins 1')
+      return
+    }
+
     setLoading(true)
     try {
-      const { error } = await supabase
+      const { error: errEntreprise } = await supabase
         .from('entreprises')
         .update({
           prefixe_devis: prefixeDevis.trim().toUpperCase(),
@@ -1321,8 +1359,23 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
         })
         .eq('id', entreprise.id)
 
-      if (error) throw error
-      toast.success('Prefixes de numerotation mis a jour')
+      if (errEntreprise) throw errEntreprise
+
+      const res = await fetch('/api/sequences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          updates: [
+            { prefix: prefixeDevis.trim().toUpperCase(), prochain_numero: prochainDevis },
+            { prefix: prefixeFacture.trim().toUpperCase(), prochain_numero: prochainFacture },
+            { prefix: prefixeAvoir.trim().toUpperCase(), prochain_numero: prochainAvoir },
+          ],
+        }),
+      })
+      if (!res.ok) throw new Error('Erreur mise à jour compteurs')
+
+      setOrigProchain({ devis: prochainDevis, facture: prochainFacture, avoir: prochainAvoir })
+      toast.success('Numérotation mise à jour')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur lors de la sauvegarde')
     } finally {
@@ -1333,23 +1386,38 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
   const isDirty =
     prefixeDevis !== (entreprise.prefixe_devis || 'DEV') ||
     prefixeFacture !== (entreprise.prefixe_facture || 'FAC') ||
-    prefixeAvoir !== (entreprise.prefixe_avoir || 'AVO')
+    prefixeAvoir !== (entreprise.prefixe_avoir || 'AVO') ||
+    prochainDevis !== origProchain.devis ||
+    prochainFacture !== origProchain.facture ||
+    prochainAvoir !== origProchain.avoir
+
+  const counterGoesBack =
+    prochainDevis < origProchain.devis ||
+    prochainFacture < origProchain.facture ||
+    prochainAvoir < origProchain.avoir
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Numerotation des documents</CardTitle>
+        <CardTitle>Numérotation des documents</CardTitle>
         <CardDescription>
-          Configurez les prefixes utilises pour generer les numeros de devis, factures et notes de credit.
-          Le format final sera : <strong>PREFIXE-ANNEE-NUMERO</strong> (ex: FAC-2026-0001).
+          Configurez le préfixe et le prochain numéro pour chaque type de document.
+          Format final : <strong>PRÉFIXE-ANNÉE-NUMÉRO</strong> (ex: FAC-2026-0001).
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSave} className="space-y-6">
+          {/* En-têtes colonnes */}
+          <div className="grid grid-cols-[1fr_140px_1fr] gap-4 items-center">
+            <span className="text-[11px] font-medium text-[#9CA3AF] uppercase tracking-wide">Préfixe</span>
+            <span className="text-[11px] font-medium text-[#9CA3AF] uppercase tracking-wide">Prochain N°</span>
+            <span className="text-[11px] font-medium text-[#9CA3AF] uppercase tracking-wide">Aperçu</span>
+          </div>
+
           {/* Devis */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+          <div className="grid grid-cols-[1fr_140px_1fr] gap-4 items-center">
             <div className="space-y-1.5">
-              <Label htmlFor="prefixe_devis">Prefixe Devis</Label>
+              <Label htmlFor="prefixe_devis">Devis</Label>
               <Input
                 id="prefixe_devis"
                 value={prefixeDevis}
@@ -1358,18 +1426,29 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
                 maxLength={10}
               />
             </div>
-            <div className="flex items-center gap-2 h-9">
-              <span className="text-[12px] text-[#9CA3AF] uppercase tracking-wide">Apercu :</span>
+            <div className="space-y-1.5">
+              <Label htmlFor="prochain_devis" className="invisible">N°</Label>
+              <Input
+                id="prochain_devis"
+                type="number"
+                min={1}
+                value={seqLoaded ? prochainDevis : ''}
+                onChange={(e) => setProchainDevis(Math.max(1, parseInt(e.target.value) || 1))}
+                disabled={!seqLoaded}
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-6">
               <Badge variant="secondary" className="font-mono text-sm px-3 py-1">
-                {prefixeDevis || 'DEV'}-{currentYear}-0001
+                {formatPreview(prefixeDevis || 'DEV', prochainDevis)}
               </Badge>
             </div>
           </div>
 
           {/* Facture */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+          <div className="grid grid-cols-[1fr_140px_1fr] gap-4 items-center">
             <div className="space-y-1.5">
-              <Label htmlFor="prefixe_facture">Prefixe Facture</Label>
+              <Label htmlFor="prefixe_facture">Facture</Label>
               <Input
                 id="prefixe_facture"
                 value={prefixeFacture}
@@ -1378,18 +1457,29 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
                 maxLength={10}
               />
             </div>
-            <div className="flex items-center gap-2 h-9">
-              <span className="text-[12px] text-[#9CA3AF] uppercase tracking-wide">Apercu :</span>
+            <div className="space-y-1.5">
+              <Label htmlFor="prochain_facture" className="invisible">N°</Label>
+              <Input
+                id="prochain_facture"
+                type="number"
+                min={1}
+                value={seqLoaded ? prochainFacture : ''}
+                onChange={(e) => setProchainFacture(Math.max(1, parseInt(e.target.value) || 1))}
+                disabled={!seqLoaded}
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-6">
               <Badge variant="secondary" className="font-mono text-sm px-3 py-1">
-                {prefixeFacture || 'FAC'}-{currentYear}-0001
+                {formatPreview(prefixeFacture || 'FAC', prochainFacture)}
               </Badge>
             </div>
           </div>
 
-          {/* Avoir / Note de crédit */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+          {/* Avoir */}
+          <div className="grid grid-cols-[1fr_140px_1fr] gap-4 items-center">
             <div className="space-y-1.5">
-              <Label htmlFor="prefixe_avoir">Prefixe Note de credit (Avoir)</Label>
+              <Label htmlFor="prefixe_avoir">Note de crédit (Avoir)</Label>
               <Input
                 id="prefixe_avoir"
                 value={prefixeAvoir}
@@ -1398,24 +1488,43 @@ function NumerotationTab({ entreprise }: { entreprise: Entreprise }) {
                 maxLength={10}
               />
             </div>
-            <div className="flex items-center gap-2 h-9">
-              <span className="text-[12px] text-[#9CA3AF] uppercase tracking-wide">Apercu :</span>
+            <div className="space-y-1.5">
+              <Label htmlFor="prochain_avoir" className="invisible">N°</Label>
+              <Input
+                id="prochain_avoir"
+                type="number"
+                min={1}
+                value={seqLoaded ? prochainAvoir : ''}
+                onChange={(e) => setProchainAvoir(Math.max(1, parseInt(e.target.value) || 1))}
+                disabled={!seqLoaded}
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-6">
               <Badge variant="secondary" className="font-mono text-sm px-3 py-1">
-                {prefixeAvoir || 'AVO'}-{currentYear}-0001
+                {formatPreview(prefixeAvoir || 'AVO', prochainAvoir)}
               </Badge>
             </div>
           </div>
 
+          {counterGoesBack && (
+            <div className="rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-3">
+              <p className="text-[13px] text-[#991B1B]">
+                <strong>Attention :</strong> Vous réduisez un compteur. Si des documents existent déjà
+                avec des numéros plus élevés, vous risquez des doublons — interdit en comptabilité belge.
+              </p>
+            </div>
+          )}
+
           <div className="rounded-lg border border-[#FEF3C7] bg-[#FFFBEB] p-3">
             <p className="text-[13px] text-[#92400E]">
-              <strong>Important :</strong> Modifier un prefixe ne change pas les numeros deja attribues.
-              Les nouveaux numeros utiliseront le nouveau prefixe. La numerotation sequentielle est
-              obligatoire en comptabilite belge (sans trou).
+              <strong>Important :</strong> Modifier un préfixe ne change pas les numéros déjà attribués.
+              La numérotation séquentielle sans trou est obligatoire en comptabilité belge.
             </p>
           </div>
 
           <div className="flex justify-end pt-2">
-            <Button type="submit" disabled={loading || !isDirty}>
+            <Button type="submit" disabled={loading || !isDirty || !seqLoaded}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Enregistrer
             </Button>

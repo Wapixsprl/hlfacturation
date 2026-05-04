@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { cn, formatDate, formatMontant } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { useUser } from '@/lib/hooks/useUser'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -127,6 +128,8 @@ export function ChantierDetailContent({
 }: Props) {
   const router = useRouter()
   const supabase = createClient()
+  const { utilisateur } = useUser()
+  const isSuperAdmin = utilisateur?.role === 'super_admin'
   const [activeTab, setActiveTab] = useState<TabId>('resume')
   const [saving, setSaving] = useState(false)
 
@@ -418,6 +421,7 @@ export function ChantierDetailContent({
             </Card>
 
             {/* Budget */}
+            {isSuperAdmin && (
             <Card>
               <CardContent className="p-5">
                 <h3 className="font-semibold text-[#111827] text-sm mb-4">Budget & Coûts</h3>
@@ -459,6 +463,7 @@ export function ChantierDetailContent({
                 )}
               </CardContent>
             </Card>
+            )}
 
             {/* Sous-traitants */}
             {sousTraitants.length > 0 && (
@@ -472,7 +477,7 @@ export function ChantierDetailContent({
                           <p className="text-sm font-medium text-[#111827]">{st.fournisseur?.raison_sociale}</p>
                           {st.role && <p className="text-xs text-[#6B7280]">{st.role}</p>}
                         </div>
-                        <p className="text-sm font-semibold text-[#111827]">{formatMontant(st.montant_prevu_ht)} HT</p>
+                        {isSuperAdmin && <p className="text-sm font-semibold text-[#111827]">{formatMontant(st.montant_prevu_ht)} HT</p>}
                       </div>
                     ))}
                   </div>
@@ -524,7 +529,7 @@ export function ChantierDetailContent({
                   <Link href={`/devis/${chantier.devis.id}`} className="flex items-center justify-between p-3 bg-[#F9FAFB] rounded-lg hover:bg-[#F3F4F6] transition-colors">
                     <div>
                       <p className="text-sm font-medium text-[#111827]">{chantier.devis.numero}</p>
-                      <p className="text-xs text-[#6B7280]">{formatMontant(chantier.devis.total_ttc)} TTC</p>
+                      {isSuperAdmin && <p className="text-xs text-[#6B7280]">{formatMontant(chantier.devis.total_ttc)} TTC</p>}
                     </div>
                     <ChevronRight className="h-4 w-4 text-[#9CA3AF]" />
                   </Link>
@@ -832,7 +837,7 @@ export function ChantierDetailContent({
                 <Link href={`/devis/${chantier.devis.id}`} className="flex items-center justify-between p-3 bg-[#F9FAFB] rounded-lg hover:bg-[#F3F4F6] transition-colors">
                   <div>
                     <p className="text-sm font-medium text-[#111827]">{chantier.devis.numero}</p>
-                    <p className="text-xs text-[#6B7280]">{formatMontant(chantier.devis.total_ttc)} TTC</p>
+                    {isSuperAdmin && <p className="text-xs text-[#6B7280]">{formatMontant(chantier.devis.total_ttc)} TTC</p>}
                   </div>
                   <ChevronRight className="h-4 w-4 text-[#9CA3AF]" />
                 </Link>
@@ -854,9 +859,11 @@ export function ChantierDetailContent({
                         <p className="text-sm font-medium text-[#111827]">{f.numero}</p>
                         <p className="text-xs text-[#6B7280]">{formatDate(f.date_facture)}</p>
                       </div>
+                      {isSuperAdmin && (
                       <div className="text-right">
                         <p className="text-sm font-semibold text-[#111827]">{formatMontant(f.total_ttc)}</p>
                       </div>
+                      )}
                     </Link>
                   ))}
                 </div>
@@ -878,7 +885,7 @@ export function ChantierDetailContent({
                         <p className="text-sm font-medium text-[#111827]">{fa.fournisseur?.raison_sociale} — {fa.numero_fournisseur || 'N/A'}</p>
                         <p className="text-xs text-[#6B7280]">{formatDate(fa.date_facture)}</p>
                       </div>
-                      <p className="text-sm font-semibold text-[#111827]">{formatMontant(fa.total_ttc)}</p>
+                      {isSuperAdmin && <p className="text-sm font-semibold text-[#111827]">{formatMontant(fa.total_ttc)}</p>}
                     </Link>
                   ))}
                 </div>
