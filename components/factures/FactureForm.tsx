@@ -613,11 +613,12 @@ export function FactureForm({
           ) : (
             <div className="space-y-3">
               {/* En-têtes colonnes */}
-              <div className="hidden md:grid md:grid-cols-6 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
+              <div className="hidden md:grid md:grid-cols-7 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
                 <div className="col-span-2">Désignation</div>
                 <div>Qté</div>
                 <div>PU HT</div>
                 <div>Remise</div>
+                <div>TVA</div>
                 <div className="text-right">Total HT</div>
               </div>
               {lignes.map((ligne, index) => (
@@ -707,7 +708,7 @@ export function FactureForm({
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
                         <div className="col-span-2">
                           <Input
                             value={ligne.designation}
@@ -775,6 +776,20 @@ export function FactureForm({
                           >
                             {ligne.remise_type === 'pct' ? '%' : '€'}
                           </button>
+                        </div>
+                        <div>
+                          <select
+                            value={ligne.taux_tva}
+                            onChange={(e) =>
+                              updateLigne(index, { taux_tva: parseFloat(e.target.value) })
+                            }
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs"
+                          >
+                            <option value={0}>0%</option>
+                            <option value={6}>6%</option>
+                            <option value={12}>12%</option>
+                            <option value={21}>21%</option>
+                          </select>
                         </div>
                         <div className="flex items-center justify-end font-mono text-sm font-medium">
                           {formatMontant(ligne.total_ht)}
