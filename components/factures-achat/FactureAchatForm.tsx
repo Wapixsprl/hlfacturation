@@ -449,14 +449,13 @@ export function FactureAchatForm({
               <Label htmlFor="total_ht">Montant HT</Label>
               <Input
                 id="total_ht"
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register('total_ht', { valueAsNumber: true })}
+                type="text"
+                inputMode="decimal"
+                {...form.register('total_ht')}
                 onFocus={() => { lastEditedRef.current = 'ht' }}
                 onChange={(e) => {
                   lastEditedRef.current = 'ht'
-                  form.setValue('total_ht', parseFloat(e.target.value) || 0)
+                  form.setValue('total_ht', parseFloat(e.target.value.replace(',', '.')) || 0)
                 }}
               />
               {form.formState.errors.total_ht && (
@@ -507,14 +506,13 @@ export function FactureAchatForm({
               <Label htmlFor="total_ttc">Montant TTC</Label>
               <Input
                 id="total_ttc"
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register('total_ttc', { valueAsNumber: true })}
+                type="text"
+                inputMode="decimal"
+                {...form.register('total_ttc')}
                 onFocus={() => { lastEditedRef.current = 'ttc' }}
                 onChange={(e) => {
                   lastEditedRef.current = 'ttc'
-                  form.setValue('total_ttc', parseFloat(e.target.value) || 0)
+                  form.setValue('total_ttc', parseFloat(e.target.value.replace(',', '.')) || 0)
                 }}
               />
               {form.formState.errors.total_ttc && (
@@ -531,12 +529,10 @@ export function FactureAchatForm({
               <span className="text-sm text-muted-foreground shrink-0">Remise (optionnel)</span>
               <div className="flex gap-1">
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max={remiseType === 'pct' ? 100 : undefined}
+                  type="text"
+                  inputMode="decimal"
                   value={remiseValeur || ''}
-                  onChange={(e) => setRemiseValeur(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setRemiseValeur(parseFloat(e.target.value.replace(',', '.')) || 0)}
                   placeholder={remiseType === 'pct' ? '0 %' : '0 €'}
                   className="h-8 w-24 rounded-md border border-input bg-transparent px-2 text-sm"
                 />
@@ -639,12 +635,10 @@ export function FactureAchatForm({
                     <div className="space-y-1">
                       <Label className="text-xs">Montant</Label>
                       <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        {...form.register(`echeances.${index}.montant`, {
-                          valueAsNumber: true,
-                        })}
+                        type="text"
+                        inputMode="decimal"
+                        {...form.register(`echeances.${index}.montant`)}
+                        onChange={(e) => form.setValue(`echeances.${index}.montant`, parseFloat(e.target.value.replace(',', '.')) || 0)}
                       />
                       {form.formState.errors.echeances?.[index]?.montant && (
                         <p className="text-xs text-red-500">
