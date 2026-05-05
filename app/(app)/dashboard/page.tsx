@@ -1,8 +1,16 @@
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardContent } from '@/components/dashboard/DashboardContent'
 import { OuvrierDashboard, type ChantierItem, type JournalEntry } from '@/components/dashboard/OuvrierDashboard'
+import { getPageAccess, getFirstAccessibleRoute } from '@/lib/auth/getPageAccess'
 
 export default async function DashboardPage() {
+  // Check dashboard permission before doing anything
+  const access = await getPageAccess()
+  if (access && access.role !== 'super_admin' && !access.pageAccess.includes('dashboard')) {
+    redirect(getFirstAccessibleRoute(access.pageAccess))
+  }
+
   const supabase = await createClient()
 
   // Get current user and their profile

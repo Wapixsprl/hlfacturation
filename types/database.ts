@@ -199,6 +199,12 @@ export interface Produit {
   updated_at: string
 }
 
+export interface PieceJointe {
+  name: string
+  file_path: string
+  signed_url: string
+}
+
 export interface AcompteConfig {
   pourcentage: number
   label: string
@@ -241,6 +247,7 @@ export interface Devis {
   nb_relances: number
   cgv_acceptees: boolean
   cgv_acceptees_date: string | null
+  pieces_jointes: PieceJointe[] | null
   archived_at: string | null
   created_at: string
   updated_at: string
@@ -296,6 +303,7 @@ export interface Facture {
   derniere_relance: string | null
   nb_relances: number
   nombre_envois: number
+  pieces_jointes: PieceJointe[] | null
   archived_at: string | null
   created_at: string
   updated_at: string

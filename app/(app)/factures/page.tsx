@@ -1,8 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { FacturesPageContent } from '@/components/factures/FacturesPageContent'
+import { getPageAccess } from '@/lib/auth/getPageAccess'
 
 export default async function FacturesPage() {
-  const supabase = await createClient()
+  const [supabase, access] = await Promise.all([
+    createClient(),
+    getPageAccess(),
+  ])
+  const canViewDashboard = !access || access.role === 'super_admin' || access.pageAccess.includes('dashboard')
 
   // Parallel fetch — paiements sans filtre (table petite), join côté JS
   const [{ data: factures }, { data: paiements }, { data: lignesTva }] = await Promise.all([
@@ -38,5 +43,5 @@ export default async function FacturesPage() {
     taux_tva_list: tvaMap[f.id] || [],
   }))
 
-  return <FacturesPageContent initialFactures={facturesWithPaye} initialTvaMap={tvaMap} />
+  return <FacturesPageContent initialFactures={facturesWithPaye} initialTvaMap={tvaMap} canViewDashboard={canViewDashboard} />
 }

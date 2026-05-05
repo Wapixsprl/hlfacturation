@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Facture, FactureLigne, Client, Produit, Devis, PaiementClient } from '@/types/database'
 import { calculerLigne, calculerTotauxAvecRemiseGlobale, formatMontant, formatDate } from '@/lib/utils'
@@ -27,7 +27,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
-import { Plus, Trash2, Save, Loader2, GripVertical, CreditCard, Send } from 'lucide-react'
+import { Plus, Trash2, Save, Loader2, GripVertical, CreditCard, Send, Paperclip, UserPlus } from 'lucide-react'
+import { ClientDialog } from '@/components/clients/ClientDialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,10 +42,26 @@ import {
 import { PaiementDialog } from './PaiementDialog'
 import { PaymentLinkSection } from './PaymentLinkSection'
 import { SearchSelect } from '@/components/shared/SearchSelect'
-import type { PaymentSession } from '@/types/database'
+import { PiecesJointesUploader } from '@/components/shared/PiecesJointesUploader'
+import type { PaymentSession, PieceJointe } from '@/types/database'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import type { DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+
+let _factureLigneUid = 0
+const genFactureLigneUid = () => `fl-${++_factureLigneUid}`
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function SortableLigneItem({ id, children }: { id: string; children: (h: any) => ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
+  return <div ref={setNodeRef} style={style}>{children({ ...attributes, ...listeners })}</div>
+}
 
 interface LigneForm {
   id?: string
+  _uid?: string
   type: 'produit' | 'texte' | 'section'
   produit_id: string | null
   designation: string
@@ -77,6 +94,7 @@ interface Props {
 function mapLigneFromDB(l: FactureLigne): LigneForm {
   return {
     id: l.id,
+    _uid: l.id,
     type: l.type as LigneForm['type'],
     produit_id: l.produit_id,
     designation: l.designation || '',
@@ -132,7 +150,7 @@ export function FactureForm({
   initialPaiements,
   paymentSessions,
   paymentEnabled,
-  clients,
+  clients: initialClients,
   produits,
   devisAcceptes,
   preselectedDevisId,
@@ -144,6 +162,18 @@ export function FactureForm({
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
   const [confirmSend, setConfirmSend] = useState(false)
+  const [localClients, setLocalClients] = useState<Client[]>(initialClients)
+  const [showNewClientDialog, setShowNewClientDialog] = useState(false)
+  const designationRefs = useRef<(HTMLInputElement | null)[]>([])
+  const [shouldFocusLast, setShouldFocusLast] = useState(false)
+
+  useEffect(() => {
+    if (shouldFocusLast) {
+      setShouldFocusLast(false)
+      const lastIndex = lignes.length - 1
+      if (lastIndex >= 0) designationRefs.current[lastIndex]?.focus()
+    }
+  })
 
   // Form state
   const [typeFacture, setTypeFacture] = useState<string>(
@@ -176,6 +206,11 @@ export function FactureForm({
   )
   const [remiseGlobaleLibelle, setRemiseGlobaleLibelle] = useState(
     facture?.remise_globale_libelle || ''
+  )
+
+  // Pièces jointes
+  const [piecesJointes, setPiecesJointes] = useState<PieceJointe[]>(
+    (facture?.pieces_jointes as PieceJointe[]) || []
   )
 
   // Lines state
@@ -220,11 +255,25 @@ export function FactureForm({
   )
 
   const addLigne = (type: LigneForm['type'] = 'produit') => {
-    setLignes((prev) => [...prev, createEmptyLigne(type)])
+    setLignes((prev) => [...prev, { ...createEmptyLigne(type), _uid: genFactureLigneUid() }])
+    setShouldFocusLast(true)
   }
 
   const removeLigne = (index: number) => {
     setLignes((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setLignes((prev) => {
+        const oldIndex = prev.findIndex(l => l._uid === active.id)
+        const newIndex = prev.findIndex(l => l._uid === over.id)
+        return arrayMove(prev, oldIndex, newIndex)
+      })
+    }
   }
 
   const selectProduit = (index: number, produitId: string) => {
@@ -338,6 +387,7 @@ export function FactureForm({
         remise_globale_pct: remiseGlobaleType === 'pct' ? remiseGlobaleValeur : 0,
         remise_globale_montant: remiseGlobaleType === 'montant' ? remiseGlobaleValeur : 0,
         remise_globale_libelle: remiseGlobaleLibelle || null,
+        pieces_jointes: piecesJointes.length > 0 ? piecesJointes : [],
       }
 
       let factureId = facture?.id
@@ -466,6 +516,7 @@ export function FactureForm({
       }
     } catch {
       toast.error("Erreur lors de l'envoi de la facture")
+      router.refresh()
     }
     setSending(false)
     setConfirmSend(false)
@@ -476,7 +527,7 @@ export function FactureForm({
     return [c.prenom, c.nom].filter(Boolean).join(' ') || '\u2014'
   }
 
-  const clientOptions = clients.map((c) => ({
+  const clientOptions = localClients.map((c) => ({
     value: c.id,
     label: clientDisplayName(c),
     sublabel: c.email || c.telephone || undefined,
@@ -521,12 +572,25 @@ export function FactureForm({
           </div>
           <div className="space-y-2">
             <Label>Client *</Label>
-            <SearchSelect
-              options={clientOptions}
-              value={clientId}
-              onChange={setClientId}
-              placeholder="Rechercher un client..."
-            />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <SearchSelect
+                  options={clientOptions}
+                  value={clientId}
+                  onChange={setClientId}
+                  placeholder="Rechercher un client..."
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setShowNewClientDialog(true)}
+                title="Ajouter un nouveau client"
+              >
+                <UserPlus className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
           <div className="md:col-span-2 space-y-2">
             <Label>Importer depuis un devis (optionnel)</Label>
@@ -611,32 +675,41 @@ export function FactureForm({
               Aucune ligne. Cliquez sur &laquo; + Ligne &raquo; pour commencer.
             </p>
           ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={lignes.map(l => l._uid ?? String(l.id))} strategy={verticalListSortingStrategy}>
             <div className="space-y-3">
               {/* En-têtes colonnes */}
-              <div className="hidden md:grid md:grid-cols-7 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
+              <div className="hidden md:grid md:grid-cols-8 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
                 <div className="col-span-2">Désignation</div>
                 <div>Qté</div>
+                <div>Unité</div>
                 <div>PU HT</div>
                 <div>Remise</div>
                 <div>TVA</div>
                 <div className="text-right">Total HT</div>
               </div>
               {lignes.map((ligne, index) => (
-                <div key={index} className="border rounded-lg p-3">
+                <SortableLigneItem key={ligne._uid ?? String(index)} id={ligne._uid ?? String(index)}>
+                  {(dragHandleProps) => (
+                <div className="border rounded-lg p-3">
                   {ligne.type === 'section' ? (
                     <div className="flex items-center gap-3">
-                      <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1 flex items-center gap-2">
                         <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">
                           Section
                         </span>
                         <Input
+                          ref={(el) => { designationRefs.current[index] = el }}
                           value={ligne.designation}
                           onChange={(e) =>
                             updateLigne(index, {
                               designation: e.target.value,
                             })
                           }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); addLigne('produit') }
+                          }}
                           className="font-semibold"
                           placeholder="Titre de la section"
                         />
@@ -652,7 +725,7 @@ export function FactureForm({
                     </div>
                   ) : ligne.type === 'texte' ? (
                     <div className="flex items-start gap-3">
-                      <GripVertical className="h-4 w-4 text-muted-foreground mt-2 shrink-0" />
+                      <GripVertical className="h-4 w-4 text-muted-foreground mt-2 shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1">
                         <span className="text-xs font-medium uppercase text-muted-foreground mb-1 block">
                           Texte libre
@@ -680,7 +753,7 @@ export function FactureForm({
                   ) : (
                     <div className="space-y-3">
                       <div className="flex items-center gap-3">
-                        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                         <select
                           value={ligne.produit_id || ''}
                           onChange={(e) =>
@@ -708,59 +781,81 @@ export function FactureForm({
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-8 gap-2">
                         <div className="col-span-2">
                           <Input
+                            ref={(el) => { designationRefs.current[index] = el }}
                             value={ligne.designation}
                             onChange={(e) =>
                               updateLigne(index, {
                                 designation: e.target.value,
                               })
                             }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); addLigne('produit') }
+                            }}
                             placeholder="Désignation"
                           />
                         </div>
                         <div>
                           <Input
-                            type="number"
-                            step="0.001"
-                            min="0"
+                            type="text"
+                            inputMode="decimal"
                             value={ligne.quantite}
                             onChange={(e) =>
                               updateLigne(index, {
                                 quantite:
-                                  parseFloat(e.target.value) || 0,
+                                  parseFloat(e.target.value.replace(',', '.')) || 0,
                               })
                             }
+                            onFocus={(e) => e.target.select()}
                             placeholder="Qté"
                           />
                         </div>
                         <div>
+                          <select
+                            value={ligne.unite}
+                            onChange={(e) => updateLigne(index, { unite: e.target.value })}
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs"
+                          >
+                            <option value="piece">pce</option>
+                            <option value="h">h</option>
+                            <option value="j">jour</option>
+                            <option value="forfait">forfait</option>
+                            <option value="m2">m²</option>
+                            <option value="m3">m³</option>
+                            <option value="ml">ml</option>
+                            <option value="lot">lot</option>
+                            <option value="kg">kg</option>
+                            <option value="l">L</option>
+                            <option value="autre">autre</option>
+                          </select>
+                        </div>
+                        <div>
                           <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
+                            type="text"
+                            inputMode="decimal"
                             value={ligne.prix_unitaire_ht}
                             onChange={(e) =>
                               updateLigne(index, {
                                 prix_unitaire_ht:
-                                  parseFloat(e.target.value) || 0,
+                                  parseFloat(e.target.value.replace(',', '.')) || 0,
                               })
                             }
+                            onFocus={(e) => e.target.select()}
                             placeholder="PU HT"
                           />
                         </div>
                         <div className="flex gap-1">
                           <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max={ligne.remise_type === 'pct' ? 100 : undefined}
+                            type="text"
+                            inputMode="decimal"
                             value={ligne.remise_type === 'montant' ? ligne.remise_montant : ligne.remise_pct}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0
+                              const val = parseFloat(e.target.value.replace(',', '.')) || 0
                               updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: val } : { remise_pct: val })
                             }}
+                            onFocus={(e) => e.target.select()}
                             placeholder={ligne.remise_type === 'pct' ? 'Remise %' : 'Remise €'}
                             className="min-w-0"
                           />
@@ -810,7 +905,40 @@ export function FactureForm({
                     </div>
                   )}
                 </div>
+                  )}
+                </SortableLigneItem>
               ))}
+            </div>
+              </SortableContext>
+            </DndContext>
+          )}
+          {lignes.length > 0 && (
+            <div className="flex gap-2 mt-4">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => addLigne('texte')}
+              >
+                + Texte
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => addLigne('section')}
+              >
+                + Section
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-[#141414] hover:bg-[#141414]/90"
+                onClick={() => addLigne('produit')}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Ligne
+              </Button>
             </div>
           )}
         </CardContent>
@@ -832,12 +960,11 @@ export function FactureForm({
                 <span className="text-muted-foreground text-sm shrink-0">Remise globale</span>
                 <div className="flex gap-1 flex-1">
                   <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max={remiseGlobaleType === 'pct' ? 100 : undefined}
+                    type="text"
+                    inputMode="decimal"
                     value={remiseGlobaleValeur || ''}
-                    onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value.replace(',', '.')) || 0)}
+                    onFocus={(e) => e.target.select()}
                     placeholder={remiseGlobaleType === 'pct' ? '0 %' : '0 €'}
                     className="h-7 text-sm"
                   />
@@ -983,6 +1110,23 @@ export function FactureForm({
         </CardContent>
       </Card>
 
+      {/* Pièces jointes */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Paperclip className="h-4 w-4" />
+            Pièces jointes
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PiecesJointesUploader
+            value={piecesJointes}
+            onChange={setPiecesJointes}
+            docType="factures"
+          />
+        </CardContent>
+      </Card>
+
       {/* Action buttons */}
       <div className="flex justify-end gap-3 pb-6">
         <Button
@@ -1060,6 +1204,18 @@ export function FactureForm({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ClientDialog
+        open={showNewClientDialog}
+        onOpenChange={setShowNewClientDialog}
+        client={null}
+        onSuccess={(newClient) => {
+          if (newClient) {
+            setLocalClients((prev) => [...prev, newClient].sort((a, b) => (a.nom || '').localeCompare(b.nom || '')))
+            setClientId(newClient.id)
+          }
+        }}
+      />
     </div>
   )
 }

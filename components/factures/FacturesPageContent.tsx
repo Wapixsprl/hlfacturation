@@ -88,6 +88,7 @@ type FactureWithClient = Facture & {
 
 interface Props {
   initialFactures: FactureWithClient[]
+  canViewDashboard?: boolean
   initialTvaMap?: Record<string, number[]>
 }
 
@@ -98,7 +99,7 @@ const TVA_BADGE: Record<number, string> = {
   21: 'bg-[#DBEAFE] text-[#1D4ED8]',
 }
 
-export function FacturesPageContent({ initialFactures, initialTvaMap = {} }: Props) {
+export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canViewDashboard = true }: Props) {
   const [facturesList, setFacturesList] = useState(initialFactures)
   const [tvaMap] = useState<Record<string, number[]>>(initialTvaMap)
   const [search, setSearch] = useState('')
@@ -179,6 +180,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {} }: Pro
       }
     } catch {
       toast.error("Erreur lors de l'envoi de la facture")
+      await refreshFactures()
     }
     setSendingId(null)
     setConfirmSendId(null)
@@ -289,7 +291,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {} }: Pro
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      {canViewDashboard && <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp className="h-4 w-4 text-[#17C2D7]" />
@@ -325,7 +327,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {} }: Pro
           </div>
           <p className="text-lg font-bold text-[#7C3AED] tabular-nums">{stats.nbPayees}</p>
         </div>
-      </div>
+      </div>}
 
       <div className="flex flex-col sm:flex-row gap-4 mb-5">
         <div className="relative flex-1">
@@ -521,8 +523,8 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {} }: Pro
                           <DropdownMenuItem
                             onClick={() => window.open(`/api/factures/${f.id}/pdf`, '_blank')}
                           >
-                            <Download className="h-4 w-4 mr-2" />
-                            Telecharger PDF
+                            <Eye className="h-4 w-4 mr-2" />
+                            Voir PDF
                           </DropdownMenuItem>
                           {(f.statut === 'brouillon' || f.statut === 'envoyee') && (
                             <DropdownMenuItem

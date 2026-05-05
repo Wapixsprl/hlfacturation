@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Devis, DevisLigne, Client, Produit, AcompteConfig } from '@/types/database'
 import { calculerLigne, calculerTotauxAvecRemiseGlobale, formatMontant, isExonerationIntracom, MENTION_EXONERATION_INTRACOM } from '@/lib/utils'
@@ -28,11 +28,29 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { Plus, Trash2, Save, Loader2, GripVertical, Send, FileOutput, Lock, Receipt, PenLine, Globe, Clock, Monitor } from 'lucide-react'
+import { Plus, Trash2, Save, Loader2, GripVertical, Send, FileOutput, Lock, Receipt, PenLine, Globe, Clock, Monitor, Paperclip, UserPlus, CheckCircle } from 'lucide-react'
+import { ClientDialog } from '@/components/clients/ClientDialog'
 import { SearchSelect } from '@/components/shared/SearchSelect'
+import { PiecesJointesUploader } from '@/components/shared/PiecesJointesUploader'
+import type { PieceJointe } from '@/types/database'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import type { DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+
+let _devisLigneUid = 0
+const genLigneUid = () => `dl-${++_devisLigneUid}`
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function SortableLigneItem({ id, children }: { id: string; children: (h: any) => ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
+  return <div ref={setNodeRef} style={style}>{children({ ...attributes, ...listeners })}</div>
+}
 
 interface LigneForm {
   id?: string
+  _uid?: string
   type: 'produit' | 'texte' | 'section' | 'saut_page'
   produit_id: string | null
   designation: string
@@ -57,6 +75,7 @@ interface Props {
 function mapLigneFromDB(l: DevisLigne): LigneForm {
   return {
     id: l.id,
+    _uid: l.id,
     type: l.type as LigneForm['type'],
     produit_id: l.produit_id,
     designation: l.designation || '',
@@ -89,7 +108,7 @@ function createEmptyLigne(type: LigneForm['type'] = 'produit'): LigneForm {
   }
 }
 
-export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
+export function DevisForm({ devis, initialLignes, clients: initialClients, produits }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const isEdit = !!devis
@@ -97,6 +116,15 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
   const [confirmSend, setConfirmSend] = useState(false)
+  const [localClients, setLocalClients] = useState<Client[]>(initialClients)
+
+  // --- Auto-save ---
+  const autoSaveIdRef = useRef<string | null>(devis?.id || null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isFirstRenderRef = useRef(true)
+  const formValuesRef = useRef<Record<string, unknown>>({})
+  const [showNewClientDialog, setShowNewClientDialog] = useState(false)
 
   // --- Exonération intracommunautaire ---
   const [exonerationIntracom, setExonerationIntracom] = useState(() => {
@@ -109,7 +137,7 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
 
   const handleClientChange = (newClientId: string) => {
     setClientId(newClientId)
-    const selectedClient = clients.find((c) => c.id === newClientId)
+    const selectedClient = localClients.find((c) => c.id === newClientId)
     if (selectedClient && isExonerationIntracom(selectedClient)) {
       setExonerationIntracom(true)
       // Mettre toutes les lignes a 0% TVA
@@ -198,6 +226,11 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
 
   const totalPourcentageAcomptes = acomptes.reduce((sum, a) => sum + a.pourcentage, 0)
 
+  // --- Pièces jointes ---
+  const [piecesJointes, setPiecesJointes] = useState<PieceJointe[]>(
+    (devis?.pieces_jointes as PieceJointe[]) || []
+  )
+
   // --- Lines state ---
   const [lignes, setLignes] = useState<LigneForm[]>(
     initialLignes?.map(mapLigneFromDB) || []
@@ -220,12 +253,37 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
     []
   )
 
+  const designationRefs = useRef<(HTMLInputElement | null)[]>([])
+  const [shouldFocusLast, setShouldFocusLast] = useState(false)
+
+  useEffect(() => {
+    if (shouldFocusLast) {
+      setShouldFocusLast(false)
+      const lastIndex = lignes.length - 1
+      if (lastIndex >= 0) designationRefs.current[lastIndex]?.focus()
+    }
+  })
+
   const addLigne = (type: LigneForm['type'] = 'produit') => {
-    setLignes((prev) => [...prev, createEmptyLigne(type)])
+    setLignes((prev) => [...prev, { ...createEmptyLigne(type), _uid: genLigneUid() }])
+    setShouldFocusLast(true)
   }
 
   const removeLigne = (index: number) => {
     setLignes((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setLignes((prev) => {
+        const oldIndex = prev.findIndex(l => l._uid === active.id)
+        const newIndex = prev.findIndex(l => l._uid === over.id)
+        return arrayMove(prev, oldIndex, newIndex)
+      })
+    }
   }
 
   const selectProduit = (index: number, produitId: string) => {
@@ -248,6 +306,139 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
     remiseGlobaleType,
     remiseGlobaleValeur
   )
+
+  // --- Auto-save logic ---
+  // Update form values ref every render so handleAutoSave never has stale closures
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    formValuesRef.current = {
+      clientId, titre, referenceChantier, adresseChantier, dateDevis, dateValidite,
+      conditionsPaiement, introduction, conclusion, notesInternes,
+      remiseGlobaleType, remiseGlobaleValeur, remiseGlobaleLibelle,
+      acomptes, lignes, piecesJointes,
+    }
+  })
+
+  const handleAutoSave = useCallback(async () => {
+    const v = formValuesRef.current as {
+      clientId: string; titre: string; referenceChantier: string; adresseChantier: string
+      dateDevis: string; dateValidite: string; conditionsPaiement: string; introduction: string
+      conclusion: string; notesInternes: string; remiseGlobaleType: 'pct' | 'montant'
+      remiseGlobaleValeur: number; remiseGlobaleLibelle: string; acomptes: AcompteConfig[]
+      lignes: LigneForm[]; piecesJointes: PieceJointe[]
+    }
+    if (!v.clientId) return
+
+    setAutoSaveStatus('saving')
+
+    const produitLignesCalc = v.lignes.filter((l) => l.type === 'produit')
+    const totauxCalc = calculerTotauxAvecRemiseGlobale(
+      produitLignesCalc.map((l) => ({ total_ht: l.total_ht, taux_tva: l.taux_tva })),
+      v.remiseGlobaleType,
+      v.remiseGlobaleValeur
+    )
+
+    const devisData = {
+      client_id: v.clientId,
+      titre: v.titre || null,
+      reference_chantier: v.referenceChantier || null,
+      adresse_chantier: v.adresseChantier || null,
+      date_devis: v.dateDevis,
+      date_validite: v.dateValidite || null,
+      conditions_paiement: v.conditionsPaiement || null,
+      acomptes_config: v.acomptes.length > 0 ? v.acomptes : [],
+      introduction: v.introduction || null,
+      conclusion: v.conclusion || null,
+      notes_internes: v.notesInternes || null,
+      total_ht: totauxCalc.totalHT,
+      total_tva: totauxCalc.totalTVA,
+      total_ttc: totauxCalc.totalTTC,
+      remise_globale_type: v.remiseGlobaleType,
+      remise_globale_pct: v.remiseGlobaleType === 'pct' ? v.remiseGlobaleValeur : 0,
+      remise_globale_montant: v.remiseGlobaleType === 'montant' ? v.remiseGlobaleValeur : 0,
+      remise_globale_libelle: v.remiseGlobaleLibelle || null,
+      pieces_jointes: v.piecesJointes.length > 0 ? v.piecesJointes : [],
+    }
+
+    try {
+      let targetId = autoSaveIdRef.current
+
+      if (targetId) {
+        const { error } = await supabase.from('devis').update(devisData).eq('id', targetId)
+        if (error) throw error
+        await supabase.from('devis_lignes').delete().eq('devis_id', targetId)
+      } else {
+        const { data: authData } = await supabase.auth.getUser()
+        if (!authData.user) throw new Error('Non authentifié')
+        const { data: utilisateur } = await supabase
+          .from('utilisateurs').select('entreprise_id').eq('id', authData.user.id).single()
+        if (!utilisateur) throw new Error('Utilisateur non trouvé')
+        const { data: entrepriseData } = await supabase
+          .from('entreprises').select('prefixe_devis').eq('id', utilisateur.entreprise_id).single()
+        const prefixeDevis = entrepriseData?.prefixe_devis || 'DEV'
+        const { data: numResult } = await supabase.rpc('generate_numero', {
+          p_type: prefixeDevis,
+          p_entreprise_id: utilisateur.entreprise_id,
+        })
+        const { data: newDevis, error } = await supabase
+          .from('devis')
+          .insert({ ...devisData, entreprise_id: utilisateur.entreprise_id, numero: numResult as string })
+          .select().single()
+        if (error) throw error
+        targetId = newDevis.id
+        autoSaveIdRef.current = targetId
+        window.history.replaceState(null, '', `/devis/${targetId}`)
+      }
+
+      if (v.lignes.length > 0 && targetId) {
+        const lignesData = v.lignes.map((l, i) => ({
+          devis_id: targetId,
+          ordre: i,
+          type: l.type,
+          produit_id: l.produit_id || null,
+          designation: l.designation || null,
+          description: l.description || null,
+          quantite: l.quantite,
+          unite: l.unite,
+          prix_unitaire_ht: l.prix_unitaire_ht,
+          remise_type: l.remise_type,
+          remise_pct: l.remise_pct,
+          remise_montant: l.remise_montant,
+          taux_tva: l.taux_tva,
+          total_ht: l.total_ht,
+        }))
+        const { error: lignesError } = await supabase.from('devis_lignes').insert(lignesData)
+        if (lignesError) throw lignesError
+      }
+
+      setAutoSaveStatus('saved')
+      setTimeout(() => setAutoSaveStatus(s => s === 'saved' ? 'idle' : s), 3000)
+    } catch (err) {
+      console.error('Auto-save error:', err)
+      setAutoSaveStatus('error')
+      setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
+    }
+  }, [supabase])
+
+  // Trigger auto-save 3s after any form change
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false
+      return
+    }
+    if (isReadOnly) return
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(handleAutoSave, 3000)
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, titre, referenceChantier, adresseChantier, dateDevis, dateValidite,
+      conditionsPaiement, introduction, conclusion, notesInternes,
+      remiseGlobaleType, remiseGlobaleValeur, remiseGlobaleLibelle,
+      acomptes, lignes, piecesJointes])
 
   // --- Save ---
   const handleSave = async () => {
@@ -282,6 +473,7 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         remise_globale_pct: remiseGlobaleType === 'pct' ? remiseGlobaleValeur : 0,
         remise_globale_montant: remiseGlobaleType === 'montant' ? remiseGlobaleValeur : 0,
         remise_globale_libelle: remiseGlobaleLibelle || null,
+        pieces_jointes: piecesJointes.length > 0 ? piecesJointes : [],
       }
 
       let devisId = devis?.id
@@ -386,6 +578,7 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
       }
     } catch {
       toast.error("Erreur lors de l'envoi du devis")
+      router.refresh()
     }
     setSending(false)
     setConfirmSend(false)
@@ -397,7 +590,7 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
     return [c.prenom, c.nom].filter(Boolean).join(' ') || '\u2014'
   }
 
-  const clientOptions = clients.map((c) => ({
+  const clientOptions = localClients.map((c) => ({
     value: c.id,
     label: clientDisplayName(c),
     sublabel: c.email || c.telephone || undefined,
@@ -518,13 +711,28 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Client *</Label>
-            <SearchSelect
-              options={clientOptions}
-              value={clientId}
-              onChange={handleClientChange}
-              placeholder="Rechercher un client..."
-              disabled={isReadOnly}
-            />
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <SearchSelect
+                  options={clientOptions}
+                  value={clientId}
+                  onChange={handleClientChange}
+                  placeholder="Rechercher un client..."
+                  disabled={isReadOnly}
+                />
+              </div>
+              {!isReadOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowNewClientDialog(true)}
+                  title="Ajouter un nouveau client"
+                >
+                  <UserPlus className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Titre</Label>
@@ -651,11 +859,14 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
               Aucune ligne. Cliquez sur &laquo; + Ligne &raquo; pour commencer.
             </p>
           ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={lignes.map(l => l._uid ?? String(l.id))} strategy={verticalListSortingStrategy}>
             <div className="space-y-3">
               {/* En-têtes colonnes */}
-              <div className="hidden md:grid md:grid-cols-6 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
+              <div className="hidden md:grid md:grid-cols-7 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
                 <div className="col-span-2">Désignation</div>
                 <div>Qté</div>
+                <div>Unité</div>
                 <div>PU HT</div>
                 <div>Remise</div>
                 <div className="text-right">Total HT</div>
@@ -679,23 +890,29 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                 }
 
                 return (
-                <div key={index}>
+                <SortableLigneItem key={ligne._uid ?? String(index)} id={ligne._uid ?? String(index)}>
+                  {(dragHandleProps) => (
+                <div>
                 <div className="border rounded-lg p-3">
                   {ligne.type === 'section' ? (
                     /* ---- SECTION ---- */
                     <div className="flex items-center gap-3">
-                      <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1 flex items-center gap-2">
                         <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">
                           Section
                         </span>
                         <Input
+                          ref={(el) => { designationRefs.current[index] = el }}
                           value={ligne.designation}
                           onChange={(e) =>
                             updateLigne(index, {
                               designation: e.target.value,
                             })
                           }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !isReadOnly) { e.preventDefault(); addLigne('produit') }
+                          }}
                           className="font-semibold"
                           placeholder="Titre de la section"
                           disabled={isReadOnly}
@@ -778,62 +995,85 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                           </Button>
                         )}
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
                         <div className="col-span-2">
                           <Input
+                            ref={(el) => { designationRefs.current[index] = el }}
                             value={ligne.designation}
                             onChange={(e) =>
                               updateLigne(index, {
                                 designation: e.target.value,
                               })
                             }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !isReadOnly) { e.preventDefault(); addLigne('produit') }
+                            }}
                             placeholder="Désignation"
                             disabled={isReadOnly}
                           />
                         </div>
                         <div>
                           <Input
-                            type="number"
-                            step="0.001"
-                            min="0"
+                            type="text"
+                            inputMode="decimal"
                             value={ligne.quantite}
                             onChange={(e) =>
                               updateLigne(index, {
                                 quantite:
-                                  parseFloat(e.target.value) || 0,
+                                  parseFloat(e.target.value.replace(',', '.')) || 0,
                               })
                             }
+                            onFocus={(e) => e.target.select()}
                             placeholder="Qté"
                             disabled={isReadOnly}
                           />
                         </div>
                         <div>
+                          <select
+                            value={ligne.unite}
+                            onChange={(e) => updateLigne(index, { unite: e.target.value })}
+                            disabled={isReadOnly}
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs disabled:opacity-50"
+                          >
+                            <option value="piece">pce</option>
+                            <option value="h">h</option>
+                            <option value="j">jour</option>
+                            <option value="forfait">forfait</option>
+                            <option value="m2">m²</option>
+                            <option value="m3">m³</option>
+                            <option value="ml">ml</option>
+                            <option value="lot">lot</option>
+                            <option value="kg">kg</option>
+                            <option value="l">L</option>
+                            <option value="autre">autre</option>
+                          </select>
+                        </div>
+                        <div>
                           <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
+                            type="text"
+                            inputMode="decimal"
                             value={ligne.prix_unitaire_ht}
                             onChange={(e) =>
                               updateLigne(index, {
                                 prix_unitaire_ht:
-                                  parseFloat(e.target.value) || 0,
+                                  parseFloat(e.target.value.replace(',', '.')) || 0,
                               })
                             }
+                            onFocus={(e) => e.target.select()}
                             placeholder="PU HT"
                             disabled={isReadOnly}
                           />
                         </div>
                         <div className="flex gap-1">
                           <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max={ligne.remise_type === 'pct' ? 100 : undefined}
+                            type="text"
+                            inputMode="decimal"
                             value={ligne.remise_type === 'montant' ? ligne.remise_montant : ligne.remise_pct}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0
+                              const val = parseFloat(e.target.value.replace(',', '.')) || 0
                               updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: val } : { remise_pct: val })
                             }}
+                            onFocus={(e) => e.target.select()}
                             placeholder={ligne.remise_type === 'pct' ? 'Remise %' : 'Remise €'}
                             disabled={isReadOnly}
                             className="min-w-0"
@@ -883,8 +1123,41 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                   </div>
                 )}
                 </div>
+                  )}
+                </SortableLigneItem>
                 )
               })}
+            </div>
+              </SortableContext>
+            </DndContext>
+          )}
+          {!isReadOnly && lignes.length > 0 && (
+            <div className="flex gap-2 mt-4">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => addLigne('texte')}
+              >
+                + Texte
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => addLigne('section')}
+              >
+                + Section
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-[#141414] hover:bg-[#141414]/90"
+                onClick={() => addLigne('produit')}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Ligne
+              </Button>
             </div>
           )}
         </CardContent>
@@ -907,12 +1180,11 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                   <span className="text-muted-foreground text-sm shrink-0">Remise globale</span>
                   <div className="flex gap-1 flex-1">
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max={remiseGlobaleType === 'pct' ? 100 : undefined}
+                      type="text"
+                      inputMode="decimal"
                       value={remiseGlobaleValeur || ''}
-                      onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value.replace(',', '.')) || 0)}
+                      onFocus={(e) => e.target.select()}
                       placeholder={remiseGlobaleType === 'pct' ? '0 %' : '0 €'}
                       className="h-7 text-sm"
                     />
@@ -997,15 +1269,13 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
                       </Label>
                       <div className="flex items-center gap-2">
                         <Input
-                          type="number"
-                          step="1"
-                          min="0"
-                          max={acompte.pourcentage + Math.max(0, 100 - totalPourcentageAcomptes)}
+                          type="text"
+                          inputMode="decimal"
                           value={acompte.pourcentage}
                           onChange={(e) =>
                             updateAcompte(index, {
                               pourcentage:
-                                parseFloat(e.target.value) || 0,
+                                parseFloat(e.target.value.replace(',', '.')) || 0,
                             })
                           }
                           className="w-20"
@@ -1128,6 +1398,24 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
         </CardContent>
       </Card>
 
+      {/* Pièces jointes */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Paperclip className="h-4 w-4" />
+            Pièces jointes
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PiecesJointesUploader
+            value={piecesJointes}
+            onChange={setPiecesJointes}
+            docType="devis"
+            disabled={isReadOnly}
+          />
+        </CardContent>
+      </Card>
+
       {/* Boutons d'action */}
       <div className="flex justify-end gap-3 pb-6">
         <Button
@@ -1205,6 +1493,19 @@ export function DevisForm({ devis, initialLignes, clients, produits }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ClientDialog
+        open={showNewClientDialog}
+        onOpenChange={setShowNewClientDialog}
+        client={null}
+        onSuccess={(newClient) => {
+          if (newClient) {
+            setLocalClients((prev) => [...prev, newClient].sort((a, b) => (a.nom || '').localeCompare(b.nom || '')))
+            setClientId(newClient.id)
+            handleClientChange(newClient.id)
+          }
+        }}
+      />
     </div>
   )
 }

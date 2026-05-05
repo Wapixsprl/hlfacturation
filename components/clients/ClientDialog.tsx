@@ -24,7 +24,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   client: Client | null
-  onSuccess: () => void
+  onSuccess: (newClient?: Client) => void
 }
 
 const PAYS_OPTIONS = [
@@ -197,15 +197,21 @@ export function ClientDialog({ open, onOpenChange, client, onSuccess }: Props) {
         .eq('id', user.user!.id)
         .single()
 
-      const { error } = await supabase
+      const { data: newClient, error } = await supabase
         .from('clients')
         .insert({ ...payload, entreprise_id: utilisateur!.entreprise_id })
+        .select()
+        .single()
       if (error) {
         toast.error('Erreur lors de la creation')
         setLoading(false)
         return
       }
       toast.success('Client cree')
+      setLoading(false)
+      onOpenChange(false)
+      onSuccess(newClient as Client)
+      return
     }
 
     setLoading(false)

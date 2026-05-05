@@ -49,7 +49,7 @@ export async function GET(
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${devis.numero}${suffix}.pdf"`,
+      'Content-Disposition': `inline; filename="${devis.numero}${suffix}.pdf"`,
     },
   })
 }

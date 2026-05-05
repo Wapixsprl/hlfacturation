@@ -14,7 +14,7 @@ function fmt(n: number): string {
   return new Intl.NumberFormat('fr-BE', {
     style: 'currency',
     currency: 'EUR',
-  }).format(n)
+  }).format(n).replace(/[  ]/g, ' ')
 }
 
 function fmtDate(d: string | null | undefined): string {

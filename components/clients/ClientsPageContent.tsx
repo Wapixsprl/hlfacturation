@@ -49,9 +49,10 @@ type ClientWithStats = Client & {
 
 interface Props {
   initialClients: ClientWithStats[]
+  canViewDashboard?: boolean
 }
 
-export function ClientsPageContent({ initialClients }: Props) {
+export function ClientsPageContent({ initialClients, canViewDashboard = true }: Props) {
   const [clients, setClients] = useState(initialClients)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'tous' | 'particulier' | 'professionnel'>('tous')
@@ -156,7 +157,7 @@ export function ClientsPageContent({ initialClients }: Props) {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      {canViewDashboard && <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
             <Users className="h-4 w-4 text-[#17C2D7]" />
@@ -192,7 +193,7 @@ export function ClientsPageContent({ initialClients }: Props) {
           </div>
           <p className="text-lg font-bold text-[#DC2626] tabular-nums">{formatMontant(stats.totalEnSouffrance)}</p>
         </div>
-      </div>
+      </div>}
 
       <div className="flex flex-col sm:flex-row gap-4 mb-5">
         <div className="relative flex-1">

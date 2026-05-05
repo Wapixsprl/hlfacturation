@@ -70,14 +70,18 @@ type DevisWithClient = Devis & {
 
 interface Props {
   initialDevis: DevisWithClient[]
+  canViewDashboard?: boolean
 }
 
-export function DevisPageContent({ initialDevis }: Props) {
+export function DevisPageContent({ initialDevis, canViewDashboard = true }: Props) {
   const [devisList, setDevisList] = useState(initialDevis)
   const [search, setSearch] = useState('')
   const [statutFilter, setStatutFilter] = useState('tous')
-  const [dateDebut, setDateDebut] = useState('')
-  const [dateFin, setDateFin] = useState('')
+  const today = new Date()
+  const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
+  const todayStr = today.toISOString().split('T')[0]
+  const [dateDebut, setDateDebut] = useState(firstOfMonth)
+  const [dateFin, setDateFin] = useState(todayStr)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null)
   const router = useRouter()
@@ -147,6 +151,15 @@ export function DevisPageContent({ initialDevis }: Props) {
     }
   }
 
+  const refreshDevis = async () => {
+    const { data } = await supabase
+      .from('devis')
+      .select('*, client:clients(nom, prenom, raison_sociale, type)')
+      .is('archived_at', null)
+      .order('created_at', { ascending: false })
+    if (data) setDevisList(data as DevisWithClient[])
+  }
+
   const handleEnvoyer = async (id: string) => {
     setSendingId(id)
     try {
@@ -171,6 +184,7 @@ export function DevisPageContent({ initialDevis }: Props) {
       }
     } catch {
       toast.error("Erreur lors de l'envoi du devis")
+      await refreshDevis()
     }
     setSendingId(null)
     setConfirmSendId(null)
@@ -191,7 +205,7 @@ export function DevisPageContent({ initialDevis }: Props) {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      {canViewDashboard && <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp className="h-4 w-4 text-[#17C2D7]" />
@@ -227,7 +241,7 @@ export function DevisPageContent({ initialDevis }: Props) {
           </div>
           <p className="text-lg font-bold text-[#7C3AED] tabular-nums">{stats.tauxAcceptation}%</p>
         </div>
-      </div>
+      </div>}
 
       <div className="flex flex-col sm:flex-row gap-4 mb-5">
         <div className="relative flex-1">
@@ -258,10 +272,10 @@ export function DevisPageContent({ initialDevis }: Props) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { setDateDebut(''); setDateFin('') }}
+              onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
               className="text-[#9CA3AF] hover:text-[#111827] px-2"
             >
-              Effacer
+              Ce mois
             </Button>
           )}
         </div>
@@ -354,8 +368,8 @@ export function DevisPageContent({ initialDevis }: Props) {
                         <DropdownMenuItem
                           onClick={() => window.open(`/api/devis/${d.id}/pdf`, '_blank')}
                         >
-                          <Download className="h-4 w-4 mr-2" />
-                          Telecharger PDF
+                          <Eye className="h-4 w-4 mr-2" />
+                          Voir PDF
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => window.open(`/api/devis/${d.id}/pdf?sans-prix=1`, '_blank')}

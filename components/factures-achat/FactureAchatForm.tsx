@@ -463,7 +463,7 @@ export function FactureAchatForm({
                 type="text"
                 inputMode="decimal"
                 {...form.register('total_ht')}
-                onFocus={() => { lastEditedRef.current = 'ht' }}
+                onFocus={(e) => { lastEditedRef.current = 'ht'; e.target.select() }}
                 onChange={(e) => {
                   lastEditedRef.current = 'ht'
                   form.setValue('total_ht', parseFloat(e.target.value.replace(',', '.')) || 0)
@@ -520,7 +520,7 @@ export function FactureAchatForm({
                 type="text"
                 inputMode="decimal"
                 {...form.register('total_ttc')}
-                onFocus={() => { lastEditedRef.current = 'ttc' }}
+                onFocus={(e) => { lastEditedRef.current = 'ttc'; e.target.select() }}
                 onChange={(e) => {
                   lastEditedRef.current = 'ttc'
                   form.setValue('total_ttc', parseFloat(e.target.value.replace(',', '.')) || 0)
@@ -544,6 +544,7 @@ export function FactureAchatForm({
                   inputMode="decimal"
                   value={remiseValeur || ''}
                   onChange={(e) => setRemiseValeur(parseFloat(e.target.value.replace(',', '.')) || 0)}
+                  onFocus={(e) => e.target.select()}
                   placeholder={remiseType === 'pct' ? '0 %' : '0 €'}
                   className="h-8 w-24 rounded-md border border-input bg-transparent px-2 text-sm"
                 />
@@ -649,6 +650,7 @@ export function FactureAchatForm({
                         type="text"
                         inputMode="decimal"
                         {...form.register(`echeances.${index}.montant`)}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => form.setValue(`echeances.${index}.montant`, parseFloat(e.target.value.replace(',', '.')) || 0)}
                       />
                       {form.formState.errors.echeances?.[index]?.montant && (

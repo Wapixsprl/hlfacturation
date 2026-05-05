@@ -35,6 +35,7 @@ const uniteLabels: Record<string, string> = {
 
 interface Props {
   initialProduits: Produit[]
+  canViewDashboard?: boolean
 }
 
 interface EditingCell {
@@ -43,7 +44,7 @@ interface EditingCell {
   value: string
 }
 
-export function ProduitsPageContent({ initialProduits }: Props) {
+export function ProduitsPageContent({ initialProduits, canViewDashboard = true }: Props) {
   const [produits, setProduits] = useState(initialProduits)
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('tous')
@@ -186,7 +187,7 @@ export function ProduitsPageContent({ initialProduits }: Props) {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      {canViewDashboard && <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
             <Layers className="h-4 w-4 text-[#17C2D7]" />
@@ -217,7 +218,7 @@ export function ProduitsPageContent({ initialProduits }: Props) {
             {stats.topCat ? `${categorieLabels[stats.topCat[0]] || stats.topCat[0]} (${stats.topCat[1]})` : '\u2014'}
           </p>
         </div>
-      </div>
+      </div>}
 
       <div className="flex flex-col sm:flex-row gap-4 mb-5">
         <div className="relative flex-1">

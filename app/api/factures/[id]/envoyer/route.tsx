@@ -210,11 +210,23 @@ export async function POST(
     }
   }
 
-  // 11. Send email via Brevo
+  // 11. Generate fresh signed URLs for pieces_jointes attachments
+  const extraAttachments: { name: string; url: string }[] = []
+  const piecesJointes = (facture.pieces_jointes as { name: string; file_path: string }[] | null) || []
+  for (const pj of piecesJointes) {
+    const { data: pjSigned } = await serviceSupabase.storage
+      .from('uploads')
+      .createSignedUrl(pj.file_path, 60 * 60 * 24 * 30)
+    if (pjSigned?.signedUrl) {
+      extraAttachments.push({ name: pj.name, url: pjSigned.signedUrl })
+    }
+  }
+
+  // 12. Send email via Brevo
   const montantTTC = formatMontant(facture.total_ttc)
   const viewUrl = `${getAppUrl()}/api/factures/${id}/voir?sig=${factureViewSig(id)}`
   try {
-    await envoyerFacture(clientEmail, clientNom, facture.numero, pdfUrl, montantTTC, id, paymentUrl, viewUrl)
+    await envoyerFacture(clientEmail, clientNom, facture.numero, pdfUrl, montantTTC, id, paymentUrl, viewUrl, extraAttachments)
   } catch (emailError) {
     console.error('Brevo email error:', emailError)
     return NextResponse.json({

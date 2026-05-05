@@ -46,7 +46,7 @@ export async function GET(
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${facture.numero}.pdf"`,
+      'Content-Disposition': `inline; filename="${facture.numero}.pdf"`,
     },
   })
 }

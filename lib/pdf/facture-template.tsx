@@ -14,7 +14,7 @@ function fmt(n: number): string {
   return new Intl.NumberFormat('fr-BE', {
     style: 'currency',
     currency: 'EUR',
-  }).format(n)
+  }).format(n).replace(/[  ]/g, ' ')
 }
 
 function fmtDate(d: string | null | undefined): string {
@@ -26,6 +26,15 @@ function fmtDate(d: string | null | undefined): string {
 
 function fmtPct(n: number): string {
   return n.toFixed(2).replace('.', ',') + ' %'
+}
+
+// Communication structurée belge (OGM / VCS) — format +++xxx/xxxx/xxxxx+++
+function computeOGM(numero: string): string {
+  const digits = numero.replace(/\D/g, '').slice(-10).padStart(10, '0')
+  const ref = parseInt(digits, 10)
+  const check = ref % 97 === 0 ? 97 : ref % 97
+  const full = digits + String(check).padStart(2, '0')
+  return `+++${full.slice(0, 3)}/${full.slice(3, 7)}/${full.slice(7)}+++`
 }
 
 const uniteLabels: Record<string, string> = {
@@ -537,17 +546,25 @@ export function FacturePDF({ facture, lignes, client, entreprise }: FacturePDFPr
 
         {/* CONDITIONS & LEGAL */}
         <View style={styles.conditionsBlock}>
+          <Text style={styles.conditionsTitle}>Conditions de paiement</Text>
           {facture.conditions_paiement && (
-            <>
-              <Text style={styles.conditionsTitle}>Conditions de paiement</Text>
-              <Text style={styles.conditionsText}>
-                {facture.conditions_paiement}
-              </Text>
-            </>
+            <Text style={styles.conditionsText}>
+              {facture.conditions_paiement}
+            </Text>
           )}
           {facture.date_echeance && (
             <Text style={[styles.conditionsText, { marginTop: 4 }]}>
               Date d{"'"}echeance : {fmtDate(facture.date_echeance)}
+            </Text>
+          )}
+          {entreprise.iban && (
+            <Text style={[styles.conditionsText, { marginTop: 4 }]}>
+              Virement vers : {entreprise.iban}
+            </Text>
+          )}
+          {entreprise.iban && (
+            <Text style={[styles.conditionsText, { marginTop: 2, fontFamily: 'Helvetica-Bold' }]}>
+              Communication : {computeOGM(facture.numero)}
             </Text>
           )}
           {isExonere && (

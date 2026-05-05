@@ -129,9 +129,21 @@ export async function POST(
       : [devis.client?.prenom, devis.client?.nom].filter(Boolean).join(' ') ||
         'Client'
 
-  // 12. Send email via Brevo
+  // 12. Generate fresh signed URLs for pieces_jointes attachments
+  const extraAttachments: { name: string; url: string }[] = []
+  const piecesJointes = (devis.pieces_jointes as { name: string; file_path: string }[] | null) || []
+  for (const pj of piecesJointes) {
+    const { data: pjSigned } = await serviceSupabase.storage
+      .from('uploads')
+      .createSignedUrl(pj.file_path, 60 * 60 * 24 * 30)
+    if (pjSigned?.signedUrl) {
+      extraAttachments.push({ name: pj.name, url: pjSigned.signedUrl })
+    }
+  }
+
+  // 13. Send email via Brevo
   try {
-    await envoyerDevis(clientEmail, clientNom, devis.numero, pdfUrl, lienSignature, id)
+    await envoyerDevis(clientEmail, clientNom, devis.numero, pdfUrl, lienSignature, id, extraAttachments)
   } catch (emailError) {
     console.error('Brevo email error:', emailError)
     return NextResponse.json({

@@ -173,11 +173,10 @@ export function MouvementDialog({ open, onOpenChange, onSuccess }: Props) {
             <Label htmlFor="montant">Montant (EUR)</Label>
             <Input
               id="montant"
-              type="number"
-              step="0.01"
-              min="0"
+              type="text"
+              inputMode="decimal"
               placeholder="0.00"
-              {...register('montant', { valueAsNumber: true })}
+              {...register('montant', { setValueAs: (v: string) => parseFloat(String(v).replace(',', '.')) || 0 })}
             />
             {errors.montant && (
               <p className="text-xs text-red-500">{errors.montant.message}</p>

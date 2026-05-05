@@ -1,8 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { ClientsPageContent } from '@/components/clients/ClientsPageContent'
+import { getPageAccess } from '@/lib/auth/getPageAccess'
 
 export default async function ClientsPage() {
-  const supabase = await createClient()
+  const [supabase, access] = await Promise.all([
+    createClient(),
+    getPageAccess(),
+  ])
+  const canViewDashboard = !access || access.role === 'super_admin' || access.pageAccess.includes('dashboard')
   // Parallelize ALL queries — avoid N+1
   const [{ data: clients }, { data: factures }, { data: devisAll }] = await Promise.all([
     supabase
@@ -64,5 +69,5 @@ export default async function ClientsPage() {
     total_en_souffrance: clientFacturesMap[c.id]?.en_souffrance || 0,
   }))
 
-  return <ClientsPageContent initialClients={clientsWithDevis} />
+  return <ClientsPageContent initialClients={clientsWithDevis} canViewDashboard={canViewDashboard} />
 }

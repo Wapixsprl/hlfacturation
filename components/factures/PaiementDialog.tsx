@@ -151,11 +151,10 @@ export function PaiementDialog({
           <div className="space-y-2">
             <Label>Montant *</Label>
             <Input
-              type="number"
-              step="0.01"
-              min="0.01"
+              type="text"
+              inputMode="decimal"
               value={montant}
-              onChange={(e) => setMontant(parseFloat(e.target.value) || 0)}
+              onChange={(e) => setMontant(parseFloat(e.target.value.replace(',', '.')) || 0)}
               required
             />
           </div>
