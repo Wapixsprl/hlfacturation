@@ -209,8 +209,8 @@ export function ClientDialog({ open, onOpenChange, client, onSuccess }: Props) {
       }
       toast.success('Client cree')
       setLoading(false)
-      onOpenChange(false)
       onSuccess(newClient as Client)
+      onOpenChange(false)
       return
     }
 

@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
-import { Plus, Trash2, Save, Loader2, GripVertical, CreditCard, Send, Paperclip, UserPlus } from 'lucide-react'
+import { Plus, Trash2, Save, Loader2, GripVertical, CreditCard, Send, Paperclip, UserPlus, CheckCircle } from 'lucide-react'
 import { ClientDialog } from '@/components/clients/ClientDialog'
 import {
   AlertDialog,
@@ -164,6 +164,14 @@ export function FactureForm({
   const [confirmSend, setConfirmSend] = useState(false)
   const [localClients, setLocalClients] = useState<Client[]>(initialClients)
   const [showNewClientDialog, setShowNewClientDialog] = useState(false)
+  const isFactureReadOnly = isEdit && facture?.statut === 'payee'
+
+  // --- Auto-save ---
+  const autoSaveIdRef = useRef<string | null>(facture?.id || null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isFirstRenderRef = useRef(true)
+  const formValuesRef = useRef<Record<string, unknown>>({})
   const designationRefs = useRef<(HTMLInputElement | null)[]>([])
   const [shouldFocusLast, setShouldFocusLast] = useState(false)
 
@@ -356,6 +364,138 @@ export function FactureForm({
   const totalPaye = paiements.reduce((sum, p) => sum + p.montant, 0)
   const soldeRestant = Math.round((totaux.totalTTC - totalPaye) * 100) / 100
 
+  // --- Auto-save logic ---
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    formValuesRef.current = {
+      clientId, devisId, typeFacture, dateFacture, dateEcheance, mentionTva,
+      conditionsPaiement, notesInternes, remiseGlobaleType, remiseGlobaleValeur,
+      remiseGlobaleLibelle, lignes, piecesJointes,
+    }
+  })
+
+  const handleAutoSave = useCallback(async () => {
+    const v = formValuesRef.current as {
+      clientId: string; devisId: string; typeFacture: string; dateFacture: string
+      dateEcheance: string; mentionTva: string; conditionsPaiement: string; notesInternes: string
+      remiseGlobaleType: 'pct' | 'montant'; remiseGlobaleValeur: number; remiseGlobaleLibelle: string
+      lignes: LigneForm[]; piecesJointes: PieceJointe[]
+    }
+    if (!v.clientId) return
+
+    setAutoSaveStatus('saving')
+
+    const produitLignesCalc = v.lignes.filter((l) => l.type === 'produit')
+    const totauxCalc = calculerTotauxAvecRemiseGlobale(
+      produitLignesCalc.map((l) => ({ total_ht: l.total_ht, taux_tva: l.taux_tva })),
+      v.remiseGlobaleType,
+      v.remiseGlobaleValeur
+    )
+
+    const factureData = {
+      client_id: v.clientId,
+      devis_id: v.devisId || null,
+      type: v.typeFacture,
+      date_facture: v.dateFacture,
+      date_echeance: v.dateEcheance || null,
+      mention_tva: v.mentionTva || null,
+      conditions_paiement: v.conditionsPaiement || null,
+      notes_internes: v.notesInternes || null,
+      total_ht: totauxCalc.totalHT,
+      total_tva: totauxCalc.totalTVA,
+      total_ttc: totauxCalc.totalTTC,
+      solde_ttc: totauxCalc.totalTTC,
+      remise_globale_type: v.remiseGlobaleType,
+      remise_globale_pct: v.remiseGlobaleType === 'pct' ? v.remiseGlobaleValeur : 0,
+      remise_globale_montant: v.remiseGlobaleType === 'montant' ? v.remiseGlobaleValeur : 0,
+      remise_globale_libelle: v.remiseGlobaleLibelle || null,
+      pieces_jointes: v.piecesJointes.length > 0 ? v.piecesJointes : [],
+    }
+
+    try {
+      let targetId = autoSaveIdRef.current
+
+      if (targetId) {
+        const { error } = await supabase.from('factures').update(factureData).eq('id', targetId)
+        if (error) throw error
+        await supabase.from('factures_lignes').delete().eq('facture_id', targetId)
+      } else {
+        const { data: authData } = await supabase.auth.getUser()
+        if (!authData.user) throw new Error('Non authentifié')
+        const { data: utilisateur } = await supabase
+          .from('utilisateurs').select('entreprise_id').eq('id', authData.user.id).single()
+        if (!utilisateur) throw new Error('Utilisateur non trouvé')
+        const { data: entrepriseData } = await supabase
+          .from('entreprises').select('prefixe_facture, prefixe_avoir').eq('id', utilisateur.entreprise_id).single()
+        const prefix = v.typeFacture === 'avoir'
+          ? (entrepriseData?.prefixe_avoir || 'AVO')
+          : (entrepriseData?.prefixe_facture || 'FAC')
+        const { data: numResult } = await supabase.rpc('generate_numero', {
+          p_type: prefix,
+          p_entreprise_id: utilisateur.entreprise_id,
+        })
+        const { data: newFacture, error } = await supabase
+          .from('factures')
+          .insert({ ...factureData, entreprise_id: utilisateur.entreprise_id, numero: numResult as string })
+          .select().single()
+        if (error) throw error
+        targetId = newFacture.id
+        autoSaveIdRef.current = targetId
+        if (v.devisId) {
+          await supabase.from('devis').update({ statut: 'converti' }).eq('id', v.devisId)
+        }
+        window.history.replaceState(null, '', `/factures/${targetId}`)
+      }
+
+      if (v.lignes.length > 0 && targetId) {
+        const lignesData = v.lignes.map((l, i) => ({
+          facture_id: targetId,
+          ordre: i,
+          type: l.type,
+          produit_id: l.produit_id || null,
+          designation: l.designation || null,
+          description: l.description || null,
+          quantite: l.quantite,
+          unite: l.unite,
+          prix_unitaire_ht: l.prix_unitaire_ht,
+          remise_type: l.remise_type,
+          remise_pct: l.remise_pct,
+          remise_montant: l.remise_montant,
+          taux_tva: l.taux_tva,
+          total_ht: l.total_ht,
+        }))
+        const { error: lignesError } = await supabase.from('factures_lignes').insert(lignesData)
+        if (lignesError) throw lignesError
+      }
+
+      setAutoSaveStatus('saved')
+      setTimeout(() => setAutoSaveStatus(s => s === 'saved' ? 'idle' : s), 3000)
+    } catch (err) {
+      console.error('Auto-save error:', err)
+      setAutoSaveStatus('error')
+      setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
+    }
+  }, [supabase])
+
+  // Trigger auto-save 3s after any form change
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false
+      return
+    }
+    if (isFactureReadOnly) return
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(handleAutoSave, 3000)
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, devisId, typeFacture, dateFacture, dateEcheance, mentionTva,
+      conditionsPaiement, notesInternes, remiseGlobaleType, remiseGlobaleValeur,
+      remiseGlobaleLibelle, lignes, piecesJointes])
+
   // Save
   const handleSave = async () => {
     if (!clientId) {
@@ -365,6 +505,12 @@ export function FactureForm({
     if (lignes.length === 0) {
       toast.error('Ajoutez au moins une ligne à la facture')
       return
+    }
+
+    // Cancel any pending auto-save to avoid race condition
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
     }
 
     setSaving(true)
@@ -390,17 +536,18 @@ export function FactureForm({
         pieces_jointes: piecesJointes.length > 0 ? piecesJointes : [],
       }
 
-      let factureId = facture?.id
+      // Use auto-saved ID if available
+      let factureId = facture?.id || autoSaveIdRef.current
 
-      if (isEdit) {
+      if (factureId) {
         const { error } = await supabase
           .from('factures')
           .update(factureData)
-          .eq('id', factureId!)
+          .eq('id', factureId)
         if (error) throw error
 
         // Delete existing lines then re-insert
-        await supabase.from('factures_lignes').delete().eq('facture_id', factureId!)
+        await supabase.from('factures_lignes').delete().eq('facture_id', factureId)
       } else {
         // Get user's entreprise_id
         const { data: authData } = await supabase.auth.getUser()
@@ -1128,7 +1275,21 @@ export function FactureForm({
       </Card>
 
       {/* Action buttons */}
-      <div className="flex justify-end gap-3 pb-6">
+      <div className="flex items-center justify-end gap-3 pb-6">
+        {/* Indicateur auto-save */}
+        {!isFactureReadOnly && autoSaveStatus !== 'idle' && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mr-auto">
+            {autoSaveStatus === 'saving' && (
+              <><Loader2 className="h-3 w-3 animate-spin" /><span>Sauvegarde automatique...</span></>
+            )}
+            {autoSaveStatus === 'saved' && (
+              <><CheckCircle className="h-3 w-3 text-[#059669]" /><span className="text-[#059669]">Brouillon sauvegardé</span></>
+            )}
+            {autoSaveStatus === 'error' && (
+              <span className="text-red-500">Erreur de sauvegarde auto</span>
+            )}
+          </div>
+        )}
         <Button
           type="button"
           variant="outline"

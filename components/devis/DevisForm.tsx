@@ -451,6 +451,12 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
       return
     }
 
+    // Cancel any pending auto-save to avoid race condition
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
+
     setSaving(true)
 
     try {
@@ -476,17 +482,18 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
         pieces_jointes: piecesJointes.length > 0 ? piecesJointes : [],
       }
 
-      let devisId = devis?.id
+      // Use auto-saved ID if available (doc was already created by auto-save)
+      let devisId = devis?.id || autoSaveIdRef.current
 
-      if (isEdit) {
+      if (devisId) {
         const { error } = await supabase
           .from('devis')
           .update(devisData)
-          .eq('id', devisId!)
+          .eq('id', devisId)
         if (error) throw error
 
         // Delete existing lines then re-insert
-        await supabase.from('devis_lignes').delete().eq('devis_id', devisId!)
+        await supabase.from('devis_lignes').delete().eq('devis_id', devisId)
       } else {
         // Get user's entreprise_id
         const { data: authData } = await supabase.auth.getUser()
@@ -1417,7 +1424,21 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
       </Card>
 
       {/* Boutons d'action */}
-      <div className="flex justify-end gap-3 pb-6">
+      <div className="flex items-center justify-end gap-3 pb-6">
+        {/* Indicateur auto-save */}
+        {!isReadOnly && autoSaveStatus !== 'idle' && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mr-auto">
+            {autoSaveStatus === 'saving' && (
+              <><Loader2 className="h-3 w-3 animate-spin" /><span>Sauvegarde automatique...</span></>
+            )}
+            {autoSaveStatus === 'saved' && (
+              <><CheckCircle className="h-3 w-3 text-[#059669]" /><span className="text-[#059669]">Brouillon sauvegardé</span></>
+            )}
+            {autoSaveStatus === 'error' && (
+              <span className="text-red-500">Erreur de sauvegarde auto</span>
+            )}
+          </div>
+        )}
         <Button
           type="button"
           variant="outline"
@@ -1502,7 +1523,6 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
           if (newClient) {
             setLocalClients((prev) => [...prev, newClient].sort((a, b) => (a.nom || '').localeCompare(b.nom || '')))
             setClientId(newClient.id)
-            handleClientChange(newClient.id)
           }
         }}
       />

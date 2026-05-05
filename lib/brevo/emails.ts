@@ -164,7 +164,7 @@ function factureEmailHtml(clientNom: string, numero: string, montantTTC: string,
 </html>`
 }
 
-export async function envoyerDevis(email: string, clientNom: string, numero: string, pdfUrl: string, lienSignature: string, devisId: string) {
+export async function envoyerDevis(email: string, clientNom: string, numero: string, pdfUrl: string, lienSignature: string, devisId: string, extraAttachments: { name: string; url: string }[] = []) {
   const trackingUrl = `${getAppUrl()}/api/devis/${devisId}/track`
 
   // Always use our HTML with tracking pixel — Brevo templates don't include it
@@ -172,11 +172,11 @@ export async function envoyerDevis(email: string, clientNom: string, numero: str
     to: [{ email, name: clientNom }],
     subject: `Votre devis ${numero} — HL Rénovation`,
     htmlContent: devisEmailHtml(clientNom, numero, lienSignature, trackingUrl),
-    attachments: [{ name: `${numero}.pdf`, url: pdfUrl }],
+    attachments: [{ name: `${numero}.pdf`, url: pdfUrl }, ...extraAttachments],
   })
 }
 
-export async function envoyerFacture(email: string, clientNom: string, numero: string, pdfUrl: string, montantTTC: string, factureId: string, paymentUrl?: string, viewUrl?: string) {
+export async function envoyerFacture(email: string, clientNom: string, numero: string, pdfUrl: string, montantTTC: string, factureId: string, paymentUrl?: string, viewUrl?: string, extraAttachments: { name: string; url: string }[] = []) {
   const trackingUrl = `${getAppUrl()}/api/factures/${factureId}/track`
   const resolvedViewUrl = viewUrl || pdfUrl
 
@@ -185,6 +185,6 @@ export async function envoyerFacture(email: string, clientNom: string, numero: s
     to: [{ email, name: clientNom }],
     subject: `Facture ${numero} — HL Rénovation`,
     htmlContent: factureEmailHtml(clientNom, numero, montantTTC, trackingUrl, resolvedViewUrl, paymentUrl),
-    attachments: [{ name: `${numero}.pdf`, url: pdfUrl }],
+    attachments: [{ name: `${numero}.pdf`, url: pdfUrl }, ...extraAttachments],
   })
 }

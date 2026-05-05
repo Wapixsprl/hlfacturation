@@ -78,8 +78,11 @@ export function FacturesAchatPageContent({ initialFactures }: Props) {
   const [factures, setFactures] = useState(initialFactures)
   const [search, setSearch] = useState('')
   const [statutFilter, setStatutFilter] = useState<StatutFilter>('tous')
-  const [dateDebut, setDateDebut] = useState('')
-  const [dateFin, setDateFin] = useState('')
+  const today = new Date()
+  const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
+  const todayStr = today.toISOString().split('T')[0]
+  const [dateDebut, setDateDebut] = useState(firstOfMonth)
+  const [dateFin, setDateFin] = useState(todayStr)
   const supabase = createClient()
 
   const filtered = factures.filter((f) => {
@@ -256,10 +259,10 @@ export function FacturesAchatPageContent({ initialFactures }: Props) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { setDateDebut(''); setDateFin('') }}
+              onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
               className="text-[#9CA3AF] hover:text-[#111827] px-2"
             >
-              Effacer
+              Ce mois
             </Button>
           )}
         </div>

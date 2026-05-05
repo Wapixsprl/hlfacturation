@@ -105,8 +105,11 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
   const [search, setSearch] = useState('')
   const [statutFilter, setStatutFilter] = useState('tous')
   const [typeFilter, setTypeFilter] = useState('tous')
-  const [dateDebut, setDateDebut] = useState('')
-  const [dateFin, setDateFin] = useState('')
+  const today = new Date()
+  const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
+  const todayStr = today.toISOString().split('T')[0]
+  const [dateDebut, setDateDebut] = useState(firstOfMonth)
+  const [dateFin, setDateFin] = useState(todayStr)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null)
   const [paiementFacture, setPaiementFacture] = useState<FactureWithClient | null>(null)
@@ -360,10 +363,10 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { setDateDebut(''); setDateFin('') }}
+              onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
               className="text-[#9CA3AF] hover:text-[#111827] px-2"
             >
-              Effacer
+              Ce mois
             </Button>
           )}
         </div>
