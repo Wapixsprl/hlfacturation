@@ -695,6 +695,15 @@ export function FactureForm({
     return `${d.numero} - ${clientName} - ${formatMontant(d.total_ttc)}`
   }
 
+  // Numérotation automatique sections + lignes
+  const ligneNums: Record<number, string | null> = {}
+  let _sNum = 0, _lNum = 0
+  lignes.forEach((ligne, i) => {
+    if (ligne.type === 'section') { _sNum++; _lNum = 0; ligneNums[i] = String(_sNum) }
+    else if (ligne.type === 'produit' && _sNum > 0) { _lNum++; ligneNums[i] = `${_sNum}.${_lNum}` }
+    else ligneNums[i] = null
+  })
+
   return (
     <div className="space-y-6">
       {/* Informations générales */}
@@ -843,9 +852,13 @@ export function FactureForm({
                     <div className="flex items-center gap-3">
                       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1 flex items-center gap-2">
-                        <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">
-                          Section
-                        </span>
+                        {ligneNums[index] ? (
+                          <span className="text-sm font-bold text-[#1B3A6B] shrink-0 min-w-[1.5rem] tabular-nums">
+                            {ligneNums[index]}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">Section</span>
+                        )}
                         <Input
                           ref={(el) => { designationRefs.current[index] = el }}
                           value={ligne.designation}
@@ -901,6 +914,11 @@ export function FactureForm({
                     <div className="space-y-3">
                       <div className="flex items-center gap-3">
                         <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
+                        {ligneNums[index] && (
+                          <span className="text-xs font-mono font-semibold text-[#6B7280] w-7 shrink-0 tabular-nums">
+                            {ligneNums[index]}
+                          </span>
+                        )}
                         <select
                           value={ligne.produit_id || ''}
                           onChange={(e) =>

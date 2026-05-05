@@ -603,6 +603,15 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
     sublabel: c.email || c.telephone || undefined,
   }))
 
+  // Numérotation automatique sections + lignes
+  const ligneNums: Record<number, string | null> = {}
+  let _sNum = 0, _lNum = 0
+  lignes.forEach((ligne, i) => {
+    if (ligne.type === 'section') { _sNum++; _lNum = 0; ligneNums[i] = String(_sNum) }
+    else if (ligne.type === 'produit' && _sNum > 0) { _lNum++; ligneNums[i] = `${_sNum}.${_lNum}` }
+    else ligneNums[i] = null
+  })
+
   return (
     <div className="space-y-6">
       {/* Read-only banner for signed devis */}
@@ -906,9 +915,13 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                     <div className="flex items-center gap-3">
                       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1 flex items-center gap-2">
-                        <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">
-                          Section
-                        </span>
+                        {ligneNums[index] ? (
+                          <span className="text-sm font-bold text-[#1B3A6B] shrink-0 min-w-[1.5rem] tabular-nums">
+                            {ligneNums[index]}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">Section</span>
+                        )}
                         <Input
                           ref={(el) => { designationRefs.current[index] = el }}
                           value={ligne.designation}
@@ -972,6 +985,11 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                     <div className="space-y-3">
                       <div className="flex items-center gap-3">
                         <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                        {ligneNums[index] && (
+                          <span className="text-xs font-mono font-semibold text-[#6B7280] w-7 shrink-0 tabular-nums">
+                            {ligneNums[index]}
+                          </span>
+                        )}
                         <select
                           value={ligne.produit_id || ''}
                           onChange={(e) =>
@@ -1373,6 +1391,33 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Encadré conditions de paiement auto-généré */}
+              <div className="mt-4 rounded-lg border border-[#1B3A6B]/20 bg-[#F0F4FA] px-4 py-3 space-y-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[#1B3A6B]">
+                  Conditions de paiement
+                </p>
+                {acomptes.map((a, i) => {
+                  const ordinal = i === 0 ? '1er' : `${i + 1}ème`
+                  const montant = formatMontant(Math.round(totaux.totalTTC * (a.pourcentage / 100) * 100) / 100)
+                  const label = a.label ? ` — ${a.label}` : ''
+                  return (
+                    <p key={i} className="text-[12px] text-[#1B3A6B]">
+                      <span className="font-semibold">{ordinal} acompte : {a.pourcentage}%</span>
+                      {label}
+                      <span className="font-mono ml-1 text-[#1B3A6B]/80">({montant})</span>
+                    </p>
+                  )
+                })}
+                {totalPourcentageAcomptes < 100 && (
+                  <p className="text-[12px] text-[#1B3A6B]">
+                    <span className="font-semibold">Solde : {100 - totalPourcentageAcomptes}%</span>
+                    <span className="font-mono ml-1 text-[#1B3A6B]/80">
+                      ({formatMontant(Math.round(totaux.totalTTC * ((100 - totalPourcentageAcomptes) / 100) * 100) / 100)})
+                    </span>
+                  </p>
+                )}
               </div>
             </div>
           )}

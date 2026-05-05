@@ -298,7 +298,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp className="h-4 w-4 text-[#17C2D7]" />
-            <span className="text-[12px] font-medium text-[#9CA3AF] uppercase tracking-wide">Total facture</span>
+            <span className="text-[12px] font-medium text-[#9CA3AF] uppercase tracking-wide">Total factures mensuel</span>
           </div>
           <p className="text-lg font-bold text-[#111827] tabular-nums">{formatMontant(stats.totalFacture)}</p>
         </div>
