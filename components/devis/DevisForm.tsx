@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NumericInput } from '@/components/shared/NumericInput'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
@@ -37,6 +38,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import type { DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { ScrollButtons } from '@/components/shared/ScrollButtons'
 
 let _devisLigneUid = 0
 const genLigneUid = () => `dl-${++_devisLigneUid}`
@@ -63,6 +65,7 @@ interface LigneForm {
   remise_montant: number
   taux_tva: number
   total_ht: number
+  is_option: boolean
 }
 
 interface Props {
@@ -88,6 +91,7 @@ function mapLigneFromDB(l: DevisLigne): LigneForm {
     remise_montant: l.remise_montant || 0,
     taux_tva: l.taux_tva,
     total_ht: l.total_ht,
+    is_option: l.is_option || false,
   }
 }
 
@@ -105,6 +109,7 @@ function createEmptyLigne(type: LigneForm['type'] = 'produit'): LigneForm {
     remise_montant: 0,
     taux_tva: 21,
     total_ht: 0,
+    is_option: false,
   }
 }
 
@@ -301,11 +306,14 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
 
   // --- Totals ---
   const produitLignes = lignes.filter((l) => l.type === 'produit')
+  const lignesHorsOption = produitLignes.filter((l) => !l.is_option)
+  const lignesOption = produitLignes.filter((l) => l.is_option)
   const totaux = calculerTotauxAvecRemiseGlobale(
-    produitLignes.map((l) => ({ total_ht: l.total_ht, taux_tva: l.taux_tva })),
+    lignesHorsOption.map((l) => ({ total_ht: l.total_ht, taux_tva: l.taux_tva })),
     remiseGlobaleType,
     remiseGlobaleValeur
   )
+  const totalOptions = Math.round(lignesOption.reduce((s, l) => s + l.total_ht, 0) * 100) / 100
 
   // --- Auto-save logic ---
   // Update form values ref every render so handleAutoSave never has stale closures
@@ -406,6 +414,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
           remise_montant: l.remise_montant,
           taux_tva: l.taux_tva,
           total_ht: l.total_ht,
+          is_option: l.is_option,
         }))
         const { error: lignesError } = await supabase.from('devis_lignes').insert(lignesData)
         if (lignesError) throw lignesError
@@ -549,6 +558,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
         remise_montant: l.remise_montant,
         taux_tva: l.taux_tva,
         total_ht: l.total_ht,
+        is_option: l.is_option,
       }))
 
       const { error: lignesError } = await supabase
@@ -1009,15 +1019,28 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                           ))}
                         </select>
                         {!isReadOnly && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeLigne(index)}
-                            className="ml-auto"
-                          >
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
+                          <div className="ml-auto flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => updateLigne(index, { is_option: !ligne.is_option })}
+                              title={ligne.is_option ? 'Retirer l\'option' : 'Marquer en option'}
+                              className={`shrink-0 px-2 py-1 text-[10px] font-semibold rounded border transition-colors ${
+                                ligne.is_option
+                                  ? 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200'
+                                  : 'bg-transparent text-[#9CA3AF] border-[#E5E7EB] hover:border-amber-300 hover:text-amber-600'
+                              }`}
+                            >
+                              {ligne.is_option ? 'EN OPTION' : 'Option'}
+                            </button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeLigne(index)}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
                         )}
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
@@ -1038,17 +1061,9 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                           />
                         </div>
                         <div>
-                          <Input
-                            type="text"
-                            inputMode="decimal"
+                          <NumericInput
                             value={ligne.quantite}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                quantite:
-                                  parseFloat(e.target.value.replace(',', '.')) || 0,
-                              })
-                            }
-                            onFocus={(e) => e.target.select()}
+                            onChange={(v) => updateLigne(index, { quantite: v })}
                             placeholder="Qté"
                             disabled={isReadOnly}
                           />
@@ -1074,31 +1089,17 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                           </select>
                         </div>
                         <div>
-                          <Input
-                            type="text"
-                            inputMode="decimal"
+                          <NumericInput
                             value={ligne.prix_unitaire_ht}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                prix_unitaire_ht:
-                                  parseFloat(e.target.value.replace(',', '.')) || 0,
-                              })
-                            }
-                            onFocus={(e) => e.target.select()}
+                            onChange={(v) => updateLigne(index, { prix_unitaire_ht: v })}
                             placeholder="PU HT"
                             disabled={isReadOnly}
                           />
                         </div>
                         <div className="flex gap-1">
-                          <Input
-                            type="text"
-                            inputMode="decimal"
+                          <NumericInput
                             value={ligne.remise_type === 'montant' ? ligne.remise_montant : ligne.remise_pct}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value.replace(',', '.')) || 0
-                              updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: val } : { remise_pct: val })
-                            }}
-                            onFocus={(e) => e.target.select()}
+                            onChange={(v) => updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: v } : { remise_pct: v })}
                             placeholder={ligne.remise_type === 'pct' ? 'Remise %' : 'Remise €'}
                             disabled={isReadOnly}
                             className="min-w-0"
@@ -1118,8 +1119,13 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                             </button>
                           )}
                         </div>
-                        <div className="flex items-center justify-end font-mono text-sm font-medium">
-                          {formatMontant(ligne.total_ht)}
+                        <div className="flex flex-col items-end justify-center">
+                          <span className={`font-mono text-sm font-medium ${ligne.is_option ? 'text-amber-600' : ''}`}>
+                            {formatMontant(ligne.total_ht)}
+                          </span>
+                          {ligne.is_option && (
+                            <span className="text-[9px] font-semibold text-amber-600 uppercase tracking-wide">option</span>
+                          )}
                         </div>
                       </div>
                       {/* Description row */}
@@ -1204,12 +1210,9 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-sm shrink-0">Remise globale</span>
                   <div className="flex gap-1 flex-1">
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      value={remiseGlobaleValeur || ''}
-                      onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value.replace(',', '.')) || 0)}
-                      onFocus={(e) => e.target.select()}
+                    <NumericInput
+                      value={remiseGlobaleValeur}
+                      onChange={setRemiseGlobaleValeur}
                       placeholder={remiseGlobaleType === 'pct' ? '0 %' : '0 €'}
                       className="h-7 text-sm"
                     />
@@ -1249,6 +1252,12 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
               <span className="font-semibold">Total TTC</span>
               <span className="font-mono font-bold text-lg">{formatMontant(totaux.totalTTC)}</span>
             </div>
+            {totalOptions > 0 && (
+              <div className="flex justify-between w-64 mt-2 pt-2 border-t border-amber-200">
+                <span className="text-amber-700 text-sm font-medium">Options (non incluses)</span>
+                <span className="font-mono text-sm text-amber-700">{formatMontant(totalOptions)}</span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1293,16 +1302,9 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                         Pourcentage
                       </Label>
                       <div className="flex items-center gap-2">
-                        <Input
-                          type="text"
-                          inputMode="decimal"
+                        <NumericInput
                           value={acompte.pourcentage}
-                          onChange={(e) =>
-                            updateAcompte(index, {
-                              pourcentage:
-                                parseFloat(e.target.value.replace(',', '.')) || 0,
-                            })
-                          }
+                          onChange={(v) => updateAcompte(index, { pourcentage: v })}
                           className="w-20"
                           disabled={isReadOnly}
                         />
@@ -1571,6 +1573,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
           }
         }}
       />
+      <ScrollButtons />
     </div>
   )
 }

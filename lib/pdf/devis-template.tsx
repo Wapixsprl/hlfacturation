@@ -14,7 +14,7 @@ function fmt(n: number): string {
   return new Intl.NumberFormat('fr-BE', {
     style: 'currency',
     currency: 'EUR',
-  }).format(n).replace(/[  ]/g, ' ')
+  }).format(n).replace(/[    ]/g, ' ')
 }
 
 function fmtDate(d: string | null | undefined): string {
@@ -61,7 +61,15 @@ const styles = StyleSheet.create({
     height: 50,
     objectFit: 'contain' as const,
   },
+  companyBlock: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+  },
   companyInfo: {
+    maxWidth: 200,
+    marginLeft: 10,
+  },
+  companyInfoNoLogo: {
     maxWidth: 220,
   },
   companyName: {
@@ -71,7 +79,8 @@ const styles = StyleSheet.create({
   },
   companyLine: {
     fontSize: 8,
-    color: '#555',
+    fontFamily: 'Helvetica-Bold',
+    color: '#333',
     marginBottom: 1,
   },
   // Title
@@ -113,7 +122,8 @@ const styles = StyleSheet.create({
   },
   clientLine: {
     fontSize: 8,
-    color: '#555',
+    fontFamily: 'Helvetica-Bold',
+    color: '#333',
     marginBottom: 1,
   },
   // Meta
@@ -143,7 +153,7 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1B3A6B',
     padding: 6,
     borderTopLeftRadius: 4,
     borderTopRightRadius: 4,
@@ -364,6 +374,31 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     flex: 1,
   },
+  // Résumé conditions de paiement (encadré texte)
+  paiementResume: {
+    marginTop: 8,
+    marginBottom: 10,
+    padding: 10,
+    backgroundColor: '#EEF2FA',
+    borderRadius: 4,
+    borderWidth: 0.5,
+    borderColor: '#1B3A6B',
+    borderLeftWidth: 3,
+    borderLeftColor: '#1B3A6B',
+  },
+  paiementResumeTitle: {
+    fontSize: 8,
+    fontFamily: 'Helvetica-Bold',
+    textTransform: 'uppercase' as const,
+    color: '#1B3A6B',
+    marginBottom: 5,
+    letterSpacing: 0.5,
+  },
+  paiementResumeLine: {
+    fontSize: 8,
+    color: '#1B3A6B',
+    marginBottom: 2,
+  },
   // Conditions / Legal
   conditionsBlock: {
     marginTop: 15,
@@ -468,10 +503,11 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
     .filter(Boolean)
     .join(' - ')
 
-  // TVA recap: group product lines by taux_tva
+  // TVA recap: group product lines by taux_tva (options excluded)
   const produitLignes = lignes.filter((l) => l.type === 'produit')
   const tvaGroups: Record<number, { baseHT: number; montantTVA: number }> = {}
   for (const l of produitLignes) {
+    if (l.is_option) continue
     const taux = l.taux_tva
     if (!tvaGroups[taux]) {
       tvaGroups[taux] = { baseHT: 0, montantTVA: 0 }
@@ -479,6 +515,7 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
     tvaGroups[taux].baseHT += l.total_ht
     tvaGroups[taux].montantTVA += l.total_ht * (taux / 100)
   }
+  const totalOptions = Math.round(produitLignes.filter(l => l.is_option).reduce((s, l) => s + l.total_ht, 0) * 100) / 100
 
   const round = (n: number) => Math.round(n * 100) / 100
 
@@ -487,26 +524,23 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
       <Page size="A4" style={styles.page}>
         {/* HEADER */}
         <View style={styles.header}>
-          <View style={styles.companyInfo}>
-            {entreprise.logo_url ? (
+          <View style={styles.companyBlock}>
+            {entreprise.logo_url && (
               <Image src={entreprise.logo_url} style={styles.logo} />
-            ) : (
+            )}
+            <View style={entreprise.logo_url ? styles.companyInfo : styles.companyInfoNoLogo}>
               <Text style={styles.companyName}>{entreprise.nom}</Text>
-            )}
-            <Text style={styles.companyLine}>{companyAddress}</Text>
-            {entreprise.telephone && (
-              <Text style={styles.companyLine}>
-                Tel: {entreprise.telephone}
-              </Text>
-            )}
-            {entreprise.email && (
-              <Text style={styles.companyLine}>{entreprise.email}</Text>
-            )}
-            {entreprise.tva_numero && (
-              <Text style={styles.companyLine}>
-                TVA: {entreprise.tva_numero}
-              </Text>
-            )}
+              <Text style={styles.companyLine}>{companyAddress}</Text>
+              {entreprise.telephone && (
+                <Text style={styles.companyLine}>Tel: {entreprise.telephone}</Text>
+              )}
+              {entreprise.email && (
+                <Text style={styles.companyLine}>{entreprise.email}</Text>
+              )}
+              {entreprise.tva_numero && (
+                <Text style={styles.companyLine}>TVA: {entreprise.tva_numero}</Text>
+              )}
+            </View>
           </View>
           <View>
             <Text style={styles.titleLabel}>DEVIS</Text>
@@ -616,14 +650,14 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
           {lignes.map((ligne, i) => {
             // Compute section subtotal
             let sectionSubtotal: number | null = null
-            if (ligne.type === 'produit' && !hidePrices) {
+            if (ligne.type === 'produit' && !hidePrices && !ligne.is_option) {
               const nextLine = lignes[i + 1]
               if (!nextLine || nextLine.type === 'section' || nextLine.type === 'saut_page') {
                 let hasSection = false
                 let subtotal = 0
                 for (let j = i; j >= 0; j--) {
                   if (lignes[j].type === 'section') { hasSection = true; break }
-                  if (lignes[j].type === 'produit') subtotal += lignes[j].total_ht
+                  if (lignes[j].type === 'produit' && !lignes[j].is_option) subtotal += lignes[j].total_ht
                 }
                 if (hasSection) sectionSubtotal = subtotal
               }
@@ -661,9 +695,18 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
                   style={[styles.tableRow, isAlt ? styles.tableRowAlt : {}]}
                 >
                   <View style={hidePrices ? styles.colDesignationNoPrix : styles.colDesignation}>
-                    <Text style={styles.tableCell}>
-                      {ligne.designation || ''}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={styles.tableCell}>
+                        {ligne.designation || ''}
+                      </Text>
+                      {ligne.is_option && (
+                        <View style={{ backgroundColor: '#FEF3C7', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
+                          <Text style={{ fontSize: 6, fontFamily: 'Helvetica-Bold', color: '#B45309', letterSpacing: 0.5 }}>
+                            EN OPTION
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                     {ligne.description && (
                       <Text style={styles.description}>{ligne.description}</Text>
                     )}
@@ -748,6 +791,12 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
               <Text style={styles.totalTTCLabel}>Total TTC</Text>
               <Text style={styles.totalTTCValue}>{fmt(devis.total_ttc)}</Text>
             </View>
+            {totalOptions > 0 && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#FDE68A' }}>
+                <Text style={{ fontSize: 8, color: '#B45309', fontFamily: 'Helvetica-Bold' }}>Options (non incluses dans le total)</Text>
+                <Text style={{ fontSize: 8, color: '#B45309', fontFamily: 'Helvetica-Bold' }}>{fmt(totalOptions)}</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -783,6 +832,33 @@ export function DevisPDF({ devis, lignes, client, entreprise, hidePrices = false
                     {fmt(round(devis.total_ttc * (soldePct / 100)))}
                   </Text>
                 </View>
+              )}
+            </View>
+          )
+        })()}
+
+        {/* CONDITIONS DE PAIEMENT — encadré texte auto-généré */}
+        {!hidePrices && (() => {
+          const acomptes = (devis.acomptes_config || []) as AcompteConfig[]
+          if (acomptes.length === 0) return null
+          const totalPct = acomptes.reduce((s, a) => s + a.pourcentage, 0)
+          const soldePct = Math.max(0, 100 - totalPct)
+          return (
+            <View style={styles.paiementResume}>
+              <Text style={styles.paiementResumeTitle}>Conditions de paiement</Text>
+              {acomptes.map((a, i) => {
+                const ordinal = i === 0 ? '1er' : `${i + 1}eme`
+                const label = a.label ? ` — ${a.label}` : ''
+                return (
+                  <Text key={i} style={styles.paiementResumeLine}>
+                    {`${ordinal} acompte : ${a.pourcentage}%${label} (${fmt(round(devis.total_ttc * (a.pourcentage / 100)))})`}
+                  </Text>
+                )
+              })}
+              {soldePct > 0 && (
+                <Text style={styles.paiementResumeLine}>
+                  {`Solde : ${soldePct}% (${fmt(round(devis.total_ttc * (soldePct / 100)))})`}
+                </Text>
               )}
             </View>
           )

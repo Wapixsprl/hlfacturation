@@ -444,6 +444,8 @@ function FacturationTab({ entreprise }: { entreprise: Entreprise }) {
   const [loading, setLoading] = useState(false)
   const supabase = createClient()
 
+  const [copieEmail, setCopieEmail] = useState(entreprise.copie_email || '')
+
   const {
     register,
     handleSubmit,
@@ -466,6 +468,7 @@ function FacturationTab({ entreprise }: { entreprise: Entreprise }) {
           conditions_paiement_defaut: data.conditions_paiement_defaut || 'Comptant',
           delai_validite_devis_jours: data.delai_validite_devis_jours,
           mention_tva_defaut: data.mention_tva_defaut || null,
+          copie_email: copieEmail.trim() || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', entreprise.id)
@@ -524,6 +527,21 @@ function FacturationTab({ entreprise }: { entreprise: Entreprise }) {
               placeholder="Ex: TVA due par le cocontractant (art. 20 AR n°1)"
               {...register('mention_tva_defaut')}
             />
+          </div>
+
+          {/* Copie email */}
+          <div className="space-y-1.5">
+            <Label htmlFor="copie_email">Copie email (CC)</Label>
+            <Input
+              id="copie_email"
+              type="email"
+              placeholder="ex: comptabilite@hlrenovation.be"
+              value={copieEmail}
+              onChange={(e) => setCopieEmail(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Une copie de chaque devis et facture envoyé sera transmise à cette adresse.
+            </p>
           </div>
 
           <div className="flex justify-end pt-2">

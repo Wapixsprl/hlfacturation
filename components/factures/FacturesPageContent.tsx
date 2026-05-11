@@ -108,11 +108,13 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
   const today = new Date()
   const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
   const todayStr = today.toISOString().split('T')[0]
-  const [dateDebut, setDateDebut] = useState(firstOfMonth)
-  const [dateFin, setDateFin] = useState(todayStr)
+  const [dateDebut, setDateDebut] = useState('')
+  const [dateFin, setDateFin] = useState('')
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null)
   const [paiementFacture, setPaiementFacture] = useState<FactureWithClient | null>(null)
+  const [showArchives, setShowArchives] = useState(false)
+  const [archivedList, setArchivedList] = useState<FactureWithClient[]>([])
   const router = useRouter()
   const supabase = createClient()
   const { utilisateur } = useUser()
@@ -200,6 +202,29 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
       toast.success('Facture archivee')
       setFacturesList((prev) => prev.filter((f) => f.id !== id))
     }
+  }
+
+  const handleDesarchiver = async (id: string) => {
+    const { error } = await supabase
+      .from('factures')
+      .update({ archived_at: null })
+      .eq('id', id)
+    if (error) {
+      toast.error("Erreur lors du désarchivage")
+    } else {
+      toast.success('Facture restaurée')
+      setArchivedList((prev) => prev.filter((f) => f.id !== id))
+      await refreshFactures()
+    }
+  }
+
+  const loadArchives = async () => {
+    const { data } = await supabase
+      .from('factures')
+      .select('*, client:clients(nom, prenom, raison_sociale, type)')
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false })
+    setArchivedList((data as FactureWithClient[]) || [])
   }
 
   const refreshFactures = async () => {
@@ -359,16 +384,31 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             className="w-[140px] border-[#E5E7EB] focus:border-[#17C2D7] focus:ring-[#17C2D7]/20 text-sm"
             placeholder="Au"
           />
-          {(dateDebut || dateFin) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
-              className="text-[#9CA3AF] hover:text-[#111827] px-2"
-            >
-              Ce mois
-            </Button>
-          )}
+          <Button
+            variant={dateDebut === firstOfMonth && dateFin === todayStr ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
+            className={dateDebut === firstOfMonth && dateFin === todayStr ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7] text-xs px-3'}
+          >
+            Ce mois
+          </Button>
+          <Button
+            variant={!dateDebut && !dateFin ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setDateDebut(''); setDateFin('') }}
+            className={!dateDebut && !dateFin ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7] text-xs px-3'}
+          >
+            Tout
+          </Button>
+          <Button
+            variant={showArchives ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setShowArchives(!showArchives); if (!showArchives) loadArchives() }}
+            className={showArchives ? 'bg-[#6B7280] hover:bg-[#4B5563] text-white border-[#6B7280] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#6B7280] text-xs px-3'}
+          >
+            <Archive className="h-3 w-3 mr-1" />
+            Archives
+          </Button>
         </div>
       </div>
 
@@ -600,6 +640,47 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Archives */}
+      {showArchives && (
+        <div className="mt-6 border border-[#E5E7EB] rounded-xl overflow-hidden">
+          <div className="bg-[#F9FAFB] px-4 py-3 flex items-center gap-2 border-b border-[#E5E7EB]">
+            <Archive className="h-4 w-4 text-[#6B7280]" />
+            <span className="text-[13px] font-semibold text-[#6B7280]">Factures archivées</span>
+            <span className="ml-auto text-[12px] text-[#9CA3AF]">{archivedList.length} facture{archivedList.length > 1 ? 's' : ''}</span>
+          </div>
+          {archivedList.length === 0 ? (
+            <p className="text-center text-[13px] text-[#9CA3AF] py-6">Aucune facture archivée</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-[#F9FAFB] text-[11px] text-[#9CA3AF] uppercase">
+                <tr>
+                  <th className="px-4 py-2 text-left">Numéro</th>
+                  <th className="px-4 py-2 text-left">Client</th>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-right">Total TTC</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedList.map((f) => (
+                  <tr key={f.id} className="border-t border-[#F3F4F6]">
+                    <td className="px-4 py-2 font-mono text-[12px]">{f.numero}</td>
+                    <td className="px-4 py-2 text-[#374151]">{getClientName(f)}</td>
+                    <td className="px-4 py-2 text-[#9CA3AF]">{formatDate(f.date_facture)}</td>
+                    <td className="px-4 py-2 text-right font-mono">{formatMontant(f.total_ttc)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <Button size="sm" variant="outline" onClick={() => handleDesarchiver(f.id)} className="text-xs h-7">
+                        Restaurer
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* Paiement dialog */}
       {paiementFacture && utilisateur && (

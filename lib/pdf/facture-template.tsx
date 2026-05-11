@@ -69,7 +69,15 @@ const styles = StyleSheet.create({
     height: 50,
     objectFit: 'contain' as const,
   },
+  companyBlock: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+  },
   companyInfo: {
+    maxWidth: 200,
+    marginLeft: 10,
+  },
+  companyInfoNoLogo: {
     maxWidth: 220,
   },
   companyName: {
@@ -79,7 +87,8 @@ const styles = StyleSheet.create({
   },
   companyLine: {
     fontSize: 8,
-    color: '#555',
+    fontFamily: 'Helvetica-Bold',
+    color: '#333',
     marginBottom: 1,
   },
   titleLabel: {
@@ -111,7 +120,8 @@ const styles = StyleSheet.create({
   },
   clientLine: {
     fontSize: 8,
-    color: '#555',
+    fontFamily: 'Helvetica-Bold',
+    color: '#333',
     marginBottom: 1,
   },
   metaRow: {
@@ -133,7 +143,7 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1B3A6B',
     padding: 6,
     borderTopLeftRadius: 4,
     borderTopRightRadius: 4,
@@ -355,26 +365,23 @@ export function FacturePDF({ facture, lignes, client, entreprise }: FacturePDFPr
       <Page size="A4" style={styles.page}>
         {/* HEADER */}
         <View style={styles.header}>
-          <View style={styles.companyInfo}>
-            {entreprise.logo_url ? (
+          <View style={styles.companyBlock}>
+            {entreprise.logo_url && (
               <Image src={entreprise.logo_url} style={styles.logo} />
-            ) : (
+            )}
+            <View style={entreprise.logo_url ? styles.companyInfo : styles.companyInfoNoLogo}>
               <Text style={styles.companyName}>{entreprise.nom}</Text>
-            )}
-            <Text style={styles.companyLine}>{companyAddress}</Text>
-            {entreprise.telephone && (
-              <Text style={styles.companyLine}>
-                Tel: {entreprise.telephone}
-              </Text>
-            )}
-            {entreprise.email && (
-              <Text style={styles.companyLine}>{entreprise.email}</Text>
-            )}
-            {entreprise.tva_numero && (
-              <Text style={styles.companyLine}>
-                TVA: {entreprise.tva_numero}
-              </Text>
-            )}
+              <Text style={styles.companyLine}>{companyAddress}</Text>
+              {entreprise.telephone && (
+                <Text style={styles.companyLine}>Tel: {entreprise.telephone}</Text>
+              )}
+              {entreprise.email && (
+                <Text style={styles.companyLine}>{entreprise.email}</Text>
+              )}
+              {entreprise.tva_numero && (
+                <Text style={styles.companyLine}>TVA: {entreprise.tva_numero}</Text>
+              )}
+            </View>
           </View>
           <View>
             <Text style={styles.titleLabel}>{typeLabel}</Text>

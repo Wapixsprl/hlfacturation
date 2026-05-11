@@ -143,7 +143,7 @@ export async function POST(
 
   // 13. Send email via Brevo
   try {
-    await envoyerDevis(clientEmail, clientNom, devis.numero, pdfUrl, lienSignature, id, extraAttachments)
+    await envoyerDevis(clientEmail, clientNom, devis.numero, pdfUrl, lienSignature, id, extraAttachments, devis.entreprise?.copie_email)
   } catch (emailError) {
     console.error('Brevo email error:', emailError)
     return NextResponse.json({

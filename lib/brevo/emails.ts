@@ -6,18 +6,23 @@ const BREVO_EXPEDITEUR_NOM = process.env.BREVO_EXPEDITEUR_NOM || 'HL Rénovation
 
 interface SendEmailParams {
   to: { email: string; name?: string }[]
+  cc?: { email: string; name?: string }[]
   templateId?: number
   subject?: string
   htmlContent?: string
   params?: Record<string, string | number>
-  attachments?: { name: string; url: string }[]
+  attachments?: { name: string; url?: string; content?: string }[]
 }
 
-export async function sendEmail({ to, templateId, subject, htmlContent, params, attachments }: SendEmailParams) {
+export async function sendEmail({ to, cc, templateId, subject, htmlContent, params, attachments }: SendEmailParams) {
   const body: Record<string, unknown> = {
     sender: { email: BREVO_EXPEDITEUR_EMAIL, name: BREVO_EXPEDITEUR_NOM },
     to,
-    attachment: attachments?.map(a => ({ name: a.name, url: a.url })),
+    ...(cc && cc.length > 0 ? { cc } : {}),
+    attachment: attachments?.map(a => a.content
+      ? { name: a.name, content: a.content }
+      : { name: a.name, url: a.url }
+    ),
   }
 
   if (templateId) {
@@ -164,27 +169,31 @@ function factureEmailHtml(clientNom: string, numero: string, montantTTC: string,
 </html>`
 }
 
-export async function envoyerDevis(email: string, clientNom: string, numero: string, pdfUrl: string, lienSignature: string, devisId: string, extraAttachments: { name: string; url: string }[] = []) {
+export async function envoyerDevis(email: string, clientNom: string, numero: string, pdfUrl: string, lienSignature: string, devisId: string, extraAttachments: { name: string; url: string }[] = [], copieEmail?: string | null) {
   const trackingUrl = `${getAppUrl()}/api/devis/${devisId}/track`
 
-  // Always use our HTML with tracking pixel — Brevo templates don't include it
   return sendEmail({
     to: [{ email, name: clientNom }],
+    ...(copieEmail ? { cc: [{ email: copieEmail }] } : {}),
     subject: `Votre devis ${numero} — HL Rénovation`,
     htmlContent: devisEmailHtml(clientNom, numero, lienSignature, trackingUrl),
     attachments: [{ name: `${numero}.pdf`, url: pdfUrl }, ...extraAttachments],
   })
 }
 
-export async function envoyerFacture(email: string, clientNom: string, numero: string, pdfUrl: string, montantTTC: string, factureId: string, paymentUrl?: string, viewUrl?: string, extraAttachments: { name: string; url: string }[] = []) {
+export async function envoyerFacture(email: string, clientNom: string, numero: string, pdfUrl: string, montantTTC: string, factureId: string, paymentUrl?: string, viewUrl?: string, extraAttachments: { name: string; url: string }[] = [], pdfBuffer?: Buffer, copieEmail?: string | null) {
   const trackingUrl = `${getAppUrl()}/api/factures/${factureId}/track`
   const resolvedViewUrl = viewUrl || pdfUrl
 
-  // Always use our HTML with tracking pixel — Brevo templates don't include it
+  const mainAttachment = pdfBuffer
+    ? { name: `${numero}.pdf`, content: pdfBuffer.toString('base64') }
+    : { name: `${numero}.pdf`, url: pdfUrl }
+
   return sendEmail({
     to: [{ email, name: clientNom }],
+    ...(copieEmail ? { cc: [{ email: copieEmail }] } : {}),
     subject: `Facture ${numero} — HL Rénovation`,
     htmlContent: factureEmailHtml(clientNom, numero, montantTTC, trackingUrl, resolvedViewUrl, paymentUrl),
-    attachments: [{ name: `${numero}.pdf`, url: pdfUrl }, ...extraAttachments],
+    attachments: [mainAttachment, ...extraAttachments],
   })
 }

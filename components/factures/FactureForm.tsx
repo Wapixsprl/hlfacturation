@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NumericInput } from '@/components/shared/NumericInput'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -48,6 +49,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import type { DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { ScrollButtons } from '@/components/shared/ScrollButtons'
 
 let _factureLigneUid = 0
 const genFactureLigneUid = () => `fl-${++_factureLigneUid}`
@@ -203,6 +205,10 @@ export function FactureForm({
     facture?.notes_internes || ''
   )
 
+  // Acquittée à la création
+  const [acquittee, setAcquittee] = useState(facture?.statut === 'payee')
+  const [modePaiementAcquittee, setModePaiementAcquittee] = useState<'virement' | 'cheque' | 'cash' | 'carte' | 'autre'>('virement')
+
   // Remise globale
   const [remiseGlobaleType, setRemiseGlobaleType] = useState<'pct' | 'montant'>(
     facture?.remise_globale_type || 'pct'
@@ -215,6 +221,11 @@ export function FactureForm({
   const [remiseGlobaleLibelle, setRemiseGlobaleLibelle] = useState(
     facture?.remise_globale_libelle || ''
   )
+
+  // Acompte
+  const [acomptePct, setAcomptePct] = useState<number>(facture?.acompte_pct ?? 30)
+  const [devisTotalTTC, setDevisTotalTTC] = useState<number>(0)
+  const [devisAvgTva, setDevisAvgTva] = useState<number>(21)
 
   // Pièces jointes
   const [piecesJointes, setPiecesJointes] = useState<PieceJointe[]>(
@@ -244,6 +255,15 @@ export function FactureForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselectedDevisId, devisAcceptes])
+
+  // Init devisTotalTTC en mode édition si devis déjà lié
+  useEffect(() => {
+    if (facture?.devis_id && devisAcceptes.length > 0) {
+      const found = devisAcceptes.find((d) => d.id === facture.devis_id) as (DevisWithClient & { total_ttc: number }) | undefined
+      if (found) setDevisTotalTTC(found.total_ttc || 0)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devisAcceptes])
 
   const updateLigne = useCallback(
     (index: number, updates: Partial<LigneForm>) => {
@@ -314,7 +334,20 @@ export function FactureForm({
       .eq('devis_id', selectedDevisId)
       .order('ordre')
 
+    if (selectedDevis) {
+      setDevisTotalTTC((selectedDevis as DevisWithClient & { total_ttc: number }).total_ttc || 0)
+    }
+
     if (devisLignes && devisLignes.length > 0) {
+      // Calcul TVA moyen pondéré depuis les lignes produit
+      const produitLines = devisLignes.filter(l => l.type === 'produit' && l.total_ht > 0)
+      if (produitLines.length > 0) {
+        const totalHT = produitLines.reduce((s, l) => s + l.total_ht, 0)
+        const totalTVA = produitLines.reduce((s, l) => s + l.total_ht * l.taux_tva / 100, 0)
+        const avgTva = totalHT > 0 ? Math.round(totalTVA / totalHT * 100) : 21
+        setDevisAvgTva(avgTva)
+      }
+
       const importedLignes: LigneForm[] = devisLignes
         .filter((l) => l.type !== 'saut_page')
         .map((l) => ({
@@ -370,7 +403,7 @@ export function FactureForm({
     formValuesRef.current = {
       clientId, devisId, typeFacture, dateFacture, dateEcheance, mentionTva,
       conditionsPaiement, notesInternes, remiseGlobaleType, remiseGlobaleValeur,
-      remiseGlobaleLibelle, lignes, piecesJointes,
+      remiseGlobaleLibelle, lignes, piecesJointes, acomptePct,
     }
   })
 
@@ -379,7 +412,7 @@ export function FactureForm({
       clientId: string; devisId: string; typeFacture: string; dateFacture: string
       dateEcheance: string; mentionTva: string; conditionsPaiement: string; notesInternes: string
       remiseGlobaleType: 'pct' | 'montant'; remiseGlobaleValeur: number; remiseGlobaleLibelle: string
-      lignes: LigneForm[]; piecesJointes: PieceJointe[]
+      lignes: LigneForm[]; piecesJointes: PieceJointe[]; acomptePct: number
     }
     if (!v.clientId) return
 
@@ -410,6 +443,7 @@ export function FactureForm({
       remise_globale_montant: v.remiseGlobaleType === 'montant' ? v.remiseGlobaleValeur : 0,
       remise_globale_libelle: v.remiseGlobaleLibelle || null,
       pieces_jointes: v.piecesJointes.length > 0 ? v.piecesJointes : [],
+      acompte_pct: v.typeFacture === 'acompte' ? (v.acomptePct || null) : null,
     }
 
     try {
@@ -494,7 +528,7 @@ export function FactureForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, devisId, typeFacture, dateFacture, dateEcheance, mentionTva,
       conditionsPaiement, notesInternes, remiseGlobaleType, remiseGlobaleValeur,
-      remiseGlobaleLibelle, lignes, piecesJointes])
+      remiseGlobaleLibelle, lignes, piecesJointes, acomptePct])
 
   // Save
   const handleSave = async () => {
@@ -534,6 +568,7 @@ export function FactureForm({
         remise_globale_montant: remiseGlobaleType === 'montant' ? remiseGlobaleValeur : 0,
         remise_globale_libelle: remiseGlobaleLibelle || null,
         pieces_jointes: piecesJointes.length > 0 ? piecesJointes : [],
+        acompte_pct: typeFacture === 'acompte' ? (acomptePct || null) : null,
       }
 
       // Use auto-saved ID if available
@@ -620,10 +655,27 @@ export function FactureForm({
         .insert(lignesData)
       if (lignesError) throw lignesError
 
+      // Acquittement : marquer payée + créer le paiement
+      if (acquittee && factureId) {
+        const { data: authData } = await supabase.auth.getUser()
+        const { data: utilisateur } = await supabase
+          .from('utilisateurs').select('entreprise_id').eq('id', authData.user!.id).single()
+        await supabase.from('factures').update({ statut: 'payee', solde_ttc: 0 }).eq('id', factureId)
+        // Supprimer anciens paiements pour éviter doublons sur re-save
+        await supabase.from('paiements_clients').delete().eq('facture_id', factureId)
+        await supabase.from('paiements_clients').insert({
+          entreprise_id: utilisateur!.entreprise_id,
+          facture_id: factureId,
+          date_paiement: dateFacture,
+          montant: totaux.totalTTC,
+          mode: modePaiementAcquittee,
+        })
+      }
+
       toast.success(
         isEdit
           ? 'Facture modifiée avec succès'
-          : 'Facture créée avec succès'
+          : acquittee ? 'Facture créée et marquée acquittée' : 'Facture créée avec succès'
       )
       router.push('/factures')
       router.refresh()
@@ -790,6 +842,84 @@ export function FactureForm({
           </div>
         </CardContent>
       </Card>
+
+      {/* Configuration acompte */}
+      {typeFacture === 'acompte' && (
+        <Card className="border-orange-200 bg-orange-50/30">
+          <CardHeader>
+            <CardTitle className="text-base">Configuration de l&apos;acompte</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+              <div className="space-y-2">
+                <Label>Pourcentage d&apos;acompte</Label>
+                <div className="flex items-center gap-2">
+                  <NumericInput
+                    value={acomptePct}
+                    onChange={setAcomptePct}
+                    placeholder="Ex: 30"
+                    className="w-28"
+                  />
+                  <span className="text-sm font-medium">%</span>
+                </div>
+              </div>
+              {devisTotalTTC > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-muted-foreground">Montant de l&apos;acompte</span>
+                  <span className="text-lg font-bold text-orange-700">
+                    = {formatMontant(Math.round(devisTotalTTC * acomptePct / 100 * 100) / 100)}
+                    <span className="text-sm font-normal text-muted-foreground ml-1">TTC</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Reste à facturer :{' '}
+                    <span className="font-medium text-foreground">
+                      {formatMontant(Math.round(devisTotalTTC * (1 - acomptePct / 100) * 100) / 100)}
+                    </span>
+                    {' '}sur un total devis de {formatMontant(devisTotalTTC)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    TVA appliquée : <span className="font-medium text-foreground">{devisAvgTva}%</span>
+                    {devisAvgTva !== 21 && <span className="text-orange-600 ml-1">(taux du devis)</span>}
+                  </span>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-orange-300 text-orange-700 hover:bg-orange-50"
+                onClick={() => {
+                  const base = devisTotalTTC > 0 ? devisTotalTTC : totaux.totalTTC
+                  if (!base && !devisId) return
+                  const tva = devisAvgTva
+                  const montantTTC = Math.round(base * acomptePct / 100 * 100) / 100
+                  const montantHT = Math.round(montantTTC / (1 + tva / 100) * 100) / 100
+                  const label = devisId
+                    ? `Acompte ${acomptePct}% sur devis`
+                    : `Acompte ${acomptePct}% sur travaux`
+                  setLignes([{
+                    type: 'produit',
+                    produit_id: null,
+                    designation: label,
+                    description: '',
+                    quantite: 1,
+                    unite: 'forfait',
+                    prix_unitaire_ht: montantHT,
+                    remise_type: 'pct',
+                    remise_pct: 0,
+                    remise_montant: 0,
+                    taux_tva: tva,
+                    total_ht: montantHT,
+                    _uid: genFactureLigneUid(),
+                  }])
+                }}
+              >
+                Générer la ligne automatiquement
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Lignes de la facture */}
       <Card>
@@ -963,17 +1093,9 @@ export function FactureForm({
                           />
                         </div>
                         <div>
-                          <Input
-                            type="text"
-                            inputMode="decimal"
+                          <NumericInput
                             value={ligne.quantite}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                quantite:
-                                  parseFloat(e.target.value.replace(',', '.')) || 0,
-                              })
-                            }
-                            onFocus={(e) => e.target.select()}
+                            onChange={(v) => updateLigne(index, { quantite: v })}
                             placeholder="Qté"
                           />
                         </div>
@@ -997,30 +1119,16 @@ export function FactureForm({
                           </select>
                         </div>
                         <div>
-                          <Input
-                            type="text"
-                            inputMode="decimal"
+                          <NumericInput
                             value={ligne.prix_unitaire_ht}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                prix_unitaire_ht:
-                                  parseFloat(e.target.value.replace(',', '.')) || 0,
-                              })
-                            }
-                            onFocus={(e) => e.target.select()}
+                            onChange={(v) => updateLigne(index, { prix_unitaire_ht: v })}
                             placeholder="PU HT"
                           />
                         </div>
                         <div className="flex gap-1">
-                          <Input
-                            type="text"
-                            inputMode="decimal"
+                          <NumericInput
                             value={ligne.remise_type === 'montant' ? ligne.remise_montant : ligne.remise_pct}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value.replace(',', '.')) || 0
-                              updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: val } : { remise_pct: val })
-                            }}
-                            onFocus={(e) => e.target.select()}
+                            onChange={(v) => updateLigne(index, ligne.remise_type === 'montant' ? { remise_montant: v } : { remise_pct: v })}
                             placeholder={ligne.remise_type === 'pct' ? 'Remise %' : 'Remise €'}
                             className="min-w-0"
                           />
@@ -1124,12 +1232,9 @@ export function FactureForm({
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground text-sm shrink-0">Remise globale</span>
                 <div className="flex gap-1 flex-1">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    value={remiseGlobaleValeur || ''}
-                    onChange={(e) => setRemiseGlobaleValeur(parseFloat(e.target.value.replace(',', '.')) || 0)}
-                    onFocus={(e) => e.target.select()}
+                  <NumericInput
+                    value={remiseGlobaleValeur}
+                    onChange={setRemiseGlobaleValeur}
                     placeholder={remiseGlobaleType === 'pct' ? '0 %' : '0 €'}
                     className="h-7 text-sm"
                   />
@@ -1330,9 +1435,35 @@ export function FactureForm({
             {facture.statut === 'brouillon' ? 'Envoyer au client' : 'Renvoyer au client'}
           </Button>
         )}
+        {!isEdit && (
+          <div className="flex items-center gap-3 mr-auto">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={acquittee}
+                onChange={e => setAcquittee(e.target.checked)}
+                className="w-4 h-4 accent-emerald-600 cursor-pointer"
+              />
+              <span className="text-sm font-medium text-[#374151]">Facture acquittée</span>
+            </label>
+            {acquittee && (
+              <select
+                value={modePaiementAcquittee}
+                onChange={e => setModePaiementAcquittee(e.target.value as typeof modePaiementAcquittee)}
+                className="h-8 rounded-md border border-[#E5E7EB] bg-white px-2 text-sm text-[#374151] focus:outline-none focus:border-emerald-500"
+              >
+                <option value="virement">Virement</option>
+                <option value="cash">Espèces</option>
+                <option value="cheque">Chèque</option>
+                <option value="carte">Carte</option>
+                <option value="autre">Autre</option>
+              </select>
+            )}
+          </div>
+        )}
         <Button
           onClick={handleSave}
-          className="bg-[#141414] hover:bg-[#141414]/90"
+          className={acquittee && !isEdit ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#141414] hover:bg-[#141414]/90'}
           disabled={saving}
         >
           {saving ? (
@@ -1340,7 +1471,7 @@ export function FactureForm({
           ) : (
             <Save className="h-4 w-4 mr-2" />
           )}
-          {isEdit ? 'Enregistrer les modifications' : 'Créer la facture'}
+          {isEdit ? 'Enregistrer les modifications' : acquittee ? 'Créer et acquitter' : 'Créer la facture'}
         </Button>
       </div>
 
@@ -1395,6 +1526,7 @@ export function FactureForm({
           }
         }}
       />
+      <ScrollButtons />
     </div>
   )
 }

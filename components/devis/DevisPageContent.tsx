@@ -80,8 +80,8 @@ export function DevisPageContent({ initialDevis, canViewDashboard = true }: Prop
   const today = new Date()
   const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
   const todayStr = today.toISOString().split('T')[0]
-  const [dateDebut, setDateDebut] = useState(firstOfMonth)
-  const [dateFin, setDateFin] = useState(todayStr)
+  const [dateDebut, setDateDebut] = useState('')
+  const [dateFin, setDateFin] = useState('')
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null)
   const router = useRouter()
@@ -268,16 +268,22 @@ export function DevisPageContent({ initialDevis, canViewDashboard = true }: Prop
             onChange={(e) => setDateFin(e.target.value)}
             className="w-[140px] border-[#E5E7EB] focus:border-[#17C2D7] focus:ring-[#17C2D7]/20 text-sm"
           />
-          {(dateDebut || dateFin) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
-              className="text-[#9CA3AF] hover:text-[#111827] px-2"
-            >
-              Ce mois
-            </Button>
-          )}
+          <Button
+            variant={dateDebut === firstOfMonth && dateFin === todayStr ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
+            className={dateDebut === firstOfMonth && dateFin === todayStr ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7] text-xs px-3'}
+          >
+            Ce mois
+          </Button>
+          <Button
+            variant={!dateDebut && !dateFin ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setDateDebut(''); setDateFin('') }}
+            className={!dateDebut && !dateFin ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7] text-xs px-3'}
+          >
+            Tout
+          </Button>
         </div>
       </div>
 
@@ -390,7 +396,7 @@ export function DevisPageContent({ initialDevis, canViewDashboard = true }: Prop
                             {d.statut === 'envoye' ? 'Renvoyer' : 'Envoyer'}
                           </DropdownMenuItem>
                         )}
-                        {(d.statut === 'accepte' || d.statut === 'envoye') && (
+                        {(d.statut === 'accepte' || d.statut === 'envoye' || d.statut === 'converti') && (
                           <DropdownMenuItem
                             onClick={() => router.push(`/factures/nouveau?devis=${d.id}`)}
                           >

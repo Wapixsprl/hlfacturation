@@ -226,7 +226,7 @@ export async function POST(
   const montantTTC = formatMontant(facture.total_ttc)
   const viewUrl = `${getAppUrl()}/api/factures/${id}/voir?sig=${factureViewSig(id)}`
   try {
-    await envoyerFacture(clientEmail, clientNom, facture.numero, pdfUrl, montantTTC, id, paymentUrl, viewUrl, extraAttachments)
+    await envoyerFacture(clientEmail, clientNom, facture.numero, pdfUrl, montantTTC, id, paymentUrl, viewUrl, extraAttachments, pdfBuffer, facture.entreprise?.copie_email)
   } catch (emailError) {
     console.error('Brevo email error:', emailError)
     return NextResponse.json({

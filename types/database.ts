@@ -113,6 +113,7 @@ export interface Entreprise {
   stripe_webhook_secret_encrypted: string | null
   conditions_generales_vente: string | null
   relances_config: RelancesConfig | null
+  copie_email: string | null
   created_at: string
   updated_at: string
 }
@@ -271,6 +272,7 @@ export interface DevisLigne {
   remise_montant: number
   taux_tva: number
   total_ht: number
+  is_option: boolean
   created_at: string
   updated_at: string
 }
@@ -294,6 +296,7 @@ export interface Facture {
   remise_globale_pct: number
   remise_globale_montant: number
   remise_globale_libelle: string | null
+  acompte_pct: number | null
   montant_acomptes_deduits: number
   solde_ttc: number
   pdf_url: string | null
