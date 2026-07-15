@@ -3,7 +3,10 @@
 import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Facture, FactureLigne, Client, Produit, Devis, PaiementClient } from '@/types/database'
+import { ProduitAutocomplete } from '@/components/produits/ProduitAutocomplete'
 import { calculerLigne, calculerTotauxAvecRemiseGlobale, formatMontant, formatDate } from '@/lib/utils'
+import { getErrorMessage } from '@/lib/errors'
+import { validateLignesForDB, validateTotaux, emergencyBackup, clearEmergencyBackup } from '@/lib/safe-save'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -163,6 +166,7 @@ export function FactureForm({
   const isEdit = !!facture
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
+  const [peppolSending, setPeppolSending] = useState(false)
   const [confirmSend, setConfirmSend] = useState(false)
   const [localClients, setLocalClients] = useState<Client[]>(initialClients)
   const [showNewClientDialog, setShowNewClientDialog] = useState(false)
@@ -174,14 +178,14 @@ export function FactureForm({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstRenderRef = useRef(true)
   const formValuesRef = useRef<Record<string, unknown>>({})
-  const designationRefs = useRef<(HTMLInputElement | null)[]>([])
-  const [shouldFocusLast, setShouldFocusLast] = useState(false)
+  const designationRefs = useRef<(HTMLTextAreaElement | null)[]>([])
+  const [focusIndex, setFocusIndex] = useState<number | null>(null)
 
   useEffect(() => {
-    if (shouldFocusLast) {
-      setShouldFocusLast(false)
-      const lastIndex = lignes.length - 1
-      if (lastIndex >= 0) designationRefs.current[lastIndex]?.focus()
+    if (focusIndex !== null) {
+      const idx = focusIndex
+      setFocusIndex(null)
+      if (idx >= 0 && idx < lignes.length) designationRefs.current[idx]?.focus()
     }
   })
 
@@ -226,11 +230,20 @@ export function FactureForm({
   const [acomptePct, setAcomptePct] = useState<number>(facture?.acompte_pct ?? 30)
   const [devisTotalTTC, setDevisTotalTTC] = useState<number>(0)
   const [devisAvgTva, setDevisAvgTva] = useState<number>(21)
+  // Acomptes deja emis sur le devis (factures de type 'acompte' liees au meme devis)
+  type AcompteExistant = { id: string; numero: string; total_ttc: number; date_facture: string }
+  const [acomptesExistants, setAcomptesExistants] = useState<AcompteExistant[]>([])
+  // Pour la facture finale (solde)
+  const [isFactureFinale, setIsFactureFinale] = useState(false)
 
-  // Pièces jointes
-  const [piecesJointes, setPiecesJointes] = useState<PieceJointe[]>(
-    (facture?.pieces_jointes as PieceJointe[]) || []
-  )
+  // Pièces jointes — garde défensif : la colonne JSONB peut revenir en string si mal stockée
+  const [piecesJointes, setPiecesJointes] = useState<PieceJointe[]>(() => {
+    const raw = facture?.pieces_jointes
+    if (!raw) return []
+    if (Array.isArray(raw)) return raw as PieceJointe[]
+    if (typeof raw === 'string') { try { return JSON.parse(raw) } catch { return [] } }
+    return []
+  })
 
   // Lines state
   const [lignes, setLignes] = useState<LigneForm[]>(
@@ -261,6 +274,8 @@ export function FactureForm({
     if (facture?.devis_id && devisAcceptes.length > 0) {
       const found = devisAcceptes.find((d) => d.id === facture.devis_id) as (DevisWithClient & { total_ttc: number }) | undefined
       if (found) setDevisTotalTTC(found.total_ttc || 0)
+      // Charge aussi les acomptes existants en mode edition
+      fetchAcomptesExistants(facture.devis_id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devisAcceptes])
@@ -282,9 +297,26 @@ export function FactureForm({
     []
   )
 
-  const addLigne = (type: LigneForm['type'] = 'produit') => {
-    setLignes((prev) => [...prev, { ...createEmptyLigne(type), _uid: genFactureLigneUid() }])
-    setShouldFocusLast(true)
+  const addLigne = (type: LigneForm['type'] = 'produit', afterIndex?: number) => {
+    setLignes((prev) => {
+      const newLigne = { ...createEmptyLigne(type), _uid: genFactureLigneUid() }
+      if (afterIndex === undefined) {
+        setFocusIndex(prev.length)
+        return [...prev, newLigne]
+      }
+      // Si l'index pointe sur une section, on insere a la fin de la section
+      let insertAt = afterIndex + 1
+      if (prev[afterIndex]?.type === 'section') {
+        for (let i = afterIndex + 1; i < prev.length; i++) {
+          if (prev[i].type === 'section') break
+          insertAt = i + 1
+        }
+      }
+      const next = [...prev]
+      next.splice(insertAt, 0, newLigne)
+      setFocusIndex(insertAt)
+      return next
+    })
   }
 
   const removeLigne = (index: number) => {
@@ -317,15 +349,36 @@ export function FactureForm({
     })
   }
 
+  // Fetch existing acomptes for a devis (excluding the current facture if editing)
+  const fetchAcomptesExistants = async (selectedDevisId: string) => {
+    const query = supabase
+      .from('factures')
+      .select('id, numero, total_ttc, date_facture')
+      .eq('devis_id', selectedDevisId)
+      .eq('type', 'acompte')
+      .is('archived_at', null)
+      .order('date_facture', { ascending: true })
+    const { data } = facture?.id
+      ? await query.neq('id', facture.id)
+      : await query
+    setAcomptesExistants((data || []) as AcompteExistant[])
+  }
+
   // Import lines from devis
   const handleDevisSelect = async (selectedDevisId: string) => {
     setDevisId(selectedDevisId)
-    if (!selectedDevisId) return
+    if (!selectedDevisId) {
+      setAcomptesExistants([])
+      return
+    }
 
     const selectedDevis = devisAcceptes.find((d) => d.id === selectedDevisId)
     if (selectedDevis && selectedDevis.client_id) {
       setClientId(selectedDevis.client_id)
     }
+
+    // Fetch acomptes deja emis sur ce devis
+    await fetchAcomptesExistants(selectedDevisId)
 
     // Fetch devis lines
     const { data: devisLignes } = await supabase
@@ -446,13 +499,59 @@ export function FactureForm({
       acompte_pct: v.typeFacture === 'acompte' ? (v.acomptePct || null) : null,
     }
 
+    // === GARDE-FOU 1 : validation numeric(12,2) AVANT toute écriture ===
+    const validationError = validateLignesForDB(v.lignes)
+    if (validationError) {
+      console.warn('[autosave facture] validation rejected:', validationError)
+      setAutoSaveStatus('error')
+      setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
+      return
+    }
+    const totauxError = validateTotaux(totauxCalc.totalHT, totauxCalc.totalTVA, totauxCalc.totalTTC)
+    if (totauxError) {
+      console.warn('[autosave facture] totaux rejected:', totauxError)
+      setAutoSaveStatus('error')
+      setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
+      return
+    }
+
     try {
       let targetId = autoSaveIdRef.current
 
       if (targetId) {
+        // GARDE-FOU 2 : refuse autosave avec lignes vides en mode edit (bug etat React transitoire)
+        if (v.lignes.length === 0) {
+          console.warn('[autosave facture] lignes vide — skip')
+          return
+        }
+
+        // GARDE-FOU 3 : backup local AVANT toute écriture
+        emergencyBackup('facture', targetId, { factureData, lignes: v.lignes }, { numero: facture?.numero, totalTTC: totauxCalc.totalTTC })
+
         const { error } = await supabase.from('factures').update(factureData).eq('id', targetId)
         if (error) throw error
-        await supabase.from('factures_lignes').delete().eq('facture_id', targetId)
+
+        // GARDE-FOU 4 : RPC atomique (DELETE+INSERT en transaction Postgres)
+        const lignesPayload = v.lignes.map((l, i) => ({
+          ordre: i,
+          type: l.type,
+          produit_id: l.produit_id || null,
+          designation: l.designation || null,
+          description: l.description || null,
+          quantite: l.quantite,
+          unite: l.unite,
+          prix_unitaire_ht: l.prix_unitaire_ht,
+          remise_type: l.remise_type,
+          remise_pct: l.remise_pct,
+          remise_montant: l.remise_montant,
+          taux_tva: l.taux_tva,
+          total_ht: l.total_ht,
+        }))
+        const { error: rpcErr } = await supabase.rpc('replace_factures_lignes', {
+          p_facture_id: targetId,
+          p_lignes: lignesPayload,
+        })
+        if (rpcErr) throw rpcErr
       } else {
         const { data: authData } = await supabase.auth.getUser()
         if (!authData.user) throw new Error('Non authentifié')
@@ -479,28 +578,33 @@ export function FactureForm({
           await supabase.from('devis').update({ statut: 'converti' }).eq('id', v.devisId)
         }
         window.history.replaceState(null, '', `/factures/${targetId}`)
+
+        if (v.lignes.length > 0) {
+          const lignesPayload = v.lignes.map((l, i) => ({
+            ordre: i,
+            type: l.type,
+            produit_id: l.produit_id || null,
+            designation: l.designation || null,
+            description: l.description || null,
+            quantite: l.quantite,
+            unite: l.unite,
+            prix_unitaire_ht: l.prix_unitaire_ht,
+            remise_type: l.remise_type,
+            remise_pct: l.remise_pct,
+            remise_montant: l.remise_montant,
+            taux_tva: l.taux_tva,
+            total_ht: l.total_ht,
+          }))
+          const { error: rpcErr } = await supabase.rpc('replace_factures_lignes', {
+            p_facture_id: targetId,
+            p_lignes: lignesPayload,
+          })
+          if (rpcErr) throw rpcErr
+        }
       }
 
-      if (v.lignes.length > 0 && targetId) {
-        const lignesData = v.lignes.map((l, i) => ({
-          facture_id: targetId,
-          ordre: i,
-          type: l.type,
-          produit_id: l.produit_id || null,
-          designation: l.designation || null,
-          description: l.description || null,
-          quantite: l.quantite,
-          unite: l.unite,
-          prix_unitaire_ht: l.prix_unitaire_ht,
-          remise_type: l.remise_type,
-          remise_pct: l.remise_pct,
-          remise_montant: l.remise_montant,
-          taux_tva: l.taux_tva,
-          total_ht: l.total_ht,
-        }))
-        const { error: lignesError } = await supabase.from('factures_lignes').insert(lignesData)
-        if (lignesError) throw lignesError
-      }
+      // Succès → suppression du backup local
+      if (targetId) clearEmergencyBackup('facture', targetId)
 
       setAutoSaveStatus('saved')
       setTimeout(() => setAutoSaveStatus(s => s === 'saved' ? 'idle' : s), 3000)
@@ -509,7 +613,7 @@ export function FactureForm({
       setAutoSaveStatus('error')
       setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
     }
-  }, [supabase])
+  }, [supabase, facture?.numero])
 
   // Trigger auto-save 3s after any form change
   useEffect(() => {
@@ -538,6 +642,18 @@ export function FactureForm({
     }
     if (lignes.length === 0) {
       toast.error('Ajoutez au moins une ligne à la facture')
+      return
+    }
+
+    // === GARDE-FOU 1 : validation numeric(12,2) AVANT toute écriture ===
+    const validationError = validateLignesForDB(lignes)
+    if (validationError) {
+      toast.error(validationError, { duration: 10000 })
+      return
+    }
+    const totauxError = validateTotaux(totaux.totalHT, totaux.totalTVA, totaux.totalTTC)
+    if (totauxError) {
+      toast.error(totauxError, { duration: 10000 })
       return
     }
 
@@ -575,14 +691,32 @@ export function FactureForm({
       let factureId = facture?.id || autoSaveIdRef.current
 
       if (factureId) {
+        // GARDE-FOU : si lignes vide alors qu'il y en avait, demander confirmation
+        if (lignes.length === 0) {
+          const { count } = await supabase
+            .from('factures_lignes')
+            .select('*', { count: 'exact', head: true })
+            .eq('facture_id', factureId)
+          if ((count || 0) > 0) {
+            const ok = window.confirm(
+              `⚠️ Cette facture contient ${count} ligne(s) en base. Confirmer la suppression de toutes les lignes ?`
+            )
+            if (!ok) {
+              setSaving(false)
+              return
+            }
+          }
+        }
+
+        // GARDE-FOU 2 : backup local AVANT toute écriture
+        emergencyBackup('facture', factureId, { factureData, lignes }, { numero: facture?.numero, totalTTC: totaux.totalTTC })
+
         const { error } = await supabase
           .from('factures')
           .update(factureData)
           .eq('id', factureId)
         if (error) throw error
-
-        // Delete existing lines then re-insert
-        await supabase.from('factures_lignes').delete().eq('facture_id', factureId)
+        // Pas de DELETE ici : la RPC atomique s'en charge en transaction
       } else {
         // Get user's entreprise_id
         const { data: authData } = await supabase.auth.getUser()
@@ -632,9 +766,10 @@ export function FactureForm({
         }
       }
 
-      // Insert all lines
-      const lignesData = lignes.map((l, i) => ({
-        facture_id: factureId!,
+      // GARDE-FOU 3 : RPC atomique (DELETE+INSERT en transaction Postgres)
+      // Si une ligne échoue (overflow, contrainte), Postgres ROLLBACK
+      // automatiquement → les lignes existantes ne sont JAMAIS perdues.
+      const lignesPayload = lignes.map((l, i) => ({
         ordre: i,
         type: l.type,
         produit_id: l.produit_id || null,
@@ -649,11 +784,14 @@ export function FactureForm({
         taux_tva: l.taux_tva,
         total_ht: l.total_ht,
       }))
+      const { error: rpcErr } = await supabase.rpc('replace_factures_lignes', {
+        p_facture_id: factureId!,
+        p_lignes: lignesPayload,
+      })
+      if (rpcErr) throw rpcErr
 
-      const { error: lignesError } = await supabase
-        .from('factures_lignes')
-        .insert(lignesData)
-      if (lignesError) throw lignesError
+      // Succès → suppression du backup local d'urgence
+      if (factureId) clearEmergencyBackup('facture', factureId)
 
       // Acquittement : marquer payée + créer le paiement
       if (acquittee && factureId) {
@@ -681,7 +819,15 @@ export function FactureForm({
       router.refresh()
     } catch (err) {
       console.error(err)
-      toast.error('Erreur lors de la sauvegarde')
+      const msg = getErrorMessage(err)
+      if (msg.toLowerCase().includes('overflow') || msg.toLowerCase().includes('numeric')) {
+        toast.error(
+          'Erreur : un montant tapé est trop grand (max 100 000 000 €). Vos lignes ont été préservées — corrigez la valeur et réessayez.',
+          { duration: 12000 }
+        )
+      } else {
+        toast.error(`Erreur lors de la sauvegarde : ${msg}`, { duration: 8000 })
+      }
     }
 
     setSaving(false)
@@ -827,10 +973,15 @@ export function FactureForm({
           </div>
           <div className="space-y-2">
             <Label>Conditions de paiement</Label>
-            <Input
+            <Textarea
+              rows={4}
               value={conditionsPaiement}
               onChange={(e) => setConditionsPaiement(e.target.value)}
+              placeholder={'Comptant\n\nou\n\n**Paiement :**\n- 50% à la commande\n- 50% à la livraison'}
             />
+            <p className="text-[11px] text-[#6B7280]">
+              Mise en forme : sauts de ligne, <code>- puce</code>, <code>**gras**</code>, <code>*italique*</code>.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Mention TVA</Label>
@@ -849,10 +1000,67 @@ export function FactureForm({
           <CardHeader>
             <CardTitle className="text-base">Configuration de l&apos;acompte</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {/* Devis lie + acomptes deja emis */}
+            {devisTotalTTC > 0 && (() => {
+              const devisNumero = devisAcceptes.find((d) => d.id === devisId)?.numero || ''
+              const totalAcomptesExistants = acomptesExistants.reduce((s, a) => s + (Number(a.total_ttc) || 0), 0)
+              const restantApresExistants = Math.round((devisTotalTTC - totalAcomptesExistants) * 100) / 100
+              return (
+                <div className="rounded-lg border border-orange-200 bg-white p-3 text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Devis lié</span>
+                    <span className="font-mono font-semibold text-foreground">{devisNumero}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Total devis TTC</span>
+                    <span className="font-medium text-foreground">{formatMontant(devisTotalTTC)}</span>
+                  </div>
+                  {acomptesExistants.length > 0 && (
+                    <>
+                      <div className="border-t border-orange-100 my-2" />
+                      <div className="text-muted-foreground font-medium">Acomptes déjà émis ({acomptesExistants.length}) :</div>
+                      {acomptesExistants.map((a) => (
+                        <div key={a.id} className="flex items-center justify-between pl-2">
+                          <span className="font-mono">{a.numero}</span>
+                          <span>{formatMontant(Number(a.total_ttc))}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between pt-1 border-t border-orange-100 mt-1">
+                        <span className="text-muted-foreground">Total acomptes émis</span>
+                        <span className="font-semibold text-orange-700">{formatMontant(totalAcomptesExistants)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="border-t border-orange-200 mt-2 pt-2 flex items-center justify-between">
+                    <span className="text-muted-foreground font-medium">Reste à facturer (avant cet acompte)</span>
+                    <span className="font-bold text-orange-700">{formatMontant(restantApresExistants)}</span>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Checkbox facture finale */}
+            {devisTotalTTC > 0 && acomptesExistants.length > 0 && (
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isFactureFinale}
+                  onChange={(e) => setIsFactureFinale(e.target.checked)}
+                  className="mt-1"
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Facture finale (solde)</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Coche cette case pour facturer le solde restant. Le montant sera auto-rempli et la liste des acomptes précédents apparaîtra sur le PDF.
+                  </span>
+                </span>
+              </label>
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-end gap-4">
               <div className="space-y-2">
-                <Label>Pourcentage d&apos;acompte</Label>
+                <Label>{isFactureFinale ? 'Pourcentage solde' : "Pourcentage d'acompte"}</Label>
                 <div className="flex items-center gap-2">
                   <NumericInput
                     value={acomptePct}
@@ -865,17 +1073,12 @@ export function FactureForm({
               </div>
               {devisTotalTTC > 0 && (
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">Montant de l&apos;acompte</span>
+                  <span className="text-xs text-muted-foreground">
+                    {isFactureFinale ? 'Montant du solde' : "Montant de l'acompte"}
+                  </span>
                   <span className="text-lg font-bold text-orange-700">
                     = {formatMontant(Math.round(devisTotalTTC * acomptePct / 100 * 100) / 100)}
                     <span className="text-sm font-normal text-muted-foreground ml-1">TTC</span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Reste à facturer :{' '}
-                    <span className="font-medium text-foreground">
-                      {formatMontant(Math.round(devisTotalTTC * (1 - acomptePct / 100) * 100) / 100)}
-                    </span>
-                    {' '}sur un total devis de {formatMontant(devisTotalTTC)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     TVA appliquée : <span className="font-medium text-foreground">{devisAvgTva}%</span>
@@ -889,19 +1092,33 @@ export function FactureForm({
                 size="sm"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50"
                 onClick={() => {
-                  const base = devisTotalTTC > 0 ? devisTotalTTC : totaux.totalTTC
-                  if (!base && !devisId) return
+                  const totalAcomptesExistants = acomptesExistants.reduce((s, a) => s + (Number(a.total_ttc) || 0), 0)
+                  const baseInitial = devisTotalTTC > 0 ? devisTotalTTC : totaux.totalTTC
+                  if (!baseInitial && !devisId) return
                   const tva = devisAvgTva
-                  const montantTTC = Math.round(base * acomptePct / 100 * 100) / 100
+                  // Si finale : on prend le solde (devis - acomptes deja emis)
+                  // Sinon : pct du total devis
+                  const montantTTC = isFactureFinale
+                    ? Math.round((devisTotalTTC - totalAcomptesExistants) * 100) / 100
+                    : Math.round(baseInitial * acomptePct / 100 * 100) / 100
                   const montantHT = Math.round(montantTTC / (1 + tva / 100) * 100) / 100
-                  const label = devisId
-                    ? `Acompte ${acomptePct}% sur devis`
+                  const devisNumero = devisAcceptes.find((d) => d.id === devisId)?.numero || ''
+                  const label = isFactureFinale
+                    ? `Solde sur devis ${devisNumero}`
+                    : devisId
+                    ? `Acompte sur devis ${devisNumero}`
                     : `Acompte ${acomptePct}% sur travaux`
+                  // Description listant les acomptes precedents (uniquement pour la finale)
+                  const description = isFactureFinale && acomptesExistants.length > 0
+                    ? `Acomptes déjà émis sur ce devis :\n${acomptesExistants
+                        .map((a, i) => `${i + 1}. ${a.numero} — ${formatMontant(Number(a.total_ttc))}`)
+                        .join('\n')}\n\nTotal acomptes déduits : ${formatMontant(totalAcomptesExistants)}`
+                    : ''
                   setLignes([{
                     type: 'produit',
                     produit_id: null,
                     designation: label,
-                    description: '',
+                    description,
                     quantite: 1,
                     unite: 'forfait',
                     prix_unitaire_ht: montantHT,
@@ -912,9 +1129,10 @@ export function FactureForm({
                     total_ht: montantHT,
                     _uid: genFactureLigneUid(),
                   }])
+                  toast.success(isFactureFinale ? 'Ligne solde générée' : 'Ligne acompte générée')
                 }}
               >
-                Générer la ligne automatiquement
+                {isFactureFinale ? 'Générer la ligne solde' : 'Générer la ligne acompte'}
               </Button>
             </div>
           </CardContent>
@@ -946,7 +1164,7 @@ export function FactureForm({
               <Button
                 type="button"
                 size="sm"
-                className="bg-[#141414] hover:bg-[#141414]/90"
+                className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
                 onClick={() => addLigne('produit')}
               >
                 <Plus className="h-4 w-4 mr-1" />
@@ -983,13 +1201,13 @@ export function FactureForm({
                       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1 flex items-center gap-2">
                         {ligneNums[index] ? (
-                          <span className="text-sm font-bold text-[#1B3A6B] shrink-0 min-w-[1.5rem] tabular-nums">
+                          <span className="text-sm font-bold text-[#0B0B0D] shrink-0 min-w-[1.5rem] tabular-nums">
                             {ligneNums[index]}
                           </span>
                         ) : (
                           <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">Section</span>
                         )}
-                        <Input
+                        <Textarea
                           ref={(el) => { designationRefs.current[index] = el }}
                           value={ligne.designation}
                           onChange={(e) =>
@@ -998,20 +1216,34 @@ export function FactureForm({
                             })
                           }
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') { e.preventDefault(); addLigne('produit') }
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addLigne('produit') }
                           }}
-                          className="font-semibold"
-                          placeholder="Titre de la section"
+                          rows={1}
+                          className="font-semibold min-h-9"
+                          placeholder="Titre de la section (Cmd+Enter pour ajouter une ligne)"
                         />
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeLigne(index)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => addLigne('produit', index)}
+                          className="h-8 text-xs"
+                          title="Ajouter une ligne dans cette section"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Ligne
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeLigne(index)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
                     </div>
                   ) : ligne.type === 'texte' ? (
                     <div className="flex items-start gap-3">
@@ -1049,23 +1281,6 @@ export function FactureForm({
                             {ligneNums[index]}
                           </span>
                         )}
-                        <select
-                          value={ligne.produit_id || ''}
-                          onChange={(e) =>
-                            selectProduit(index, e.target.value)
-                          }
-                          className="flex h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-                        >
-                          <option value="">Produit du catalogue...</option>
-                          {produits.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.reference
-                                ? `${p.reference} - `
-                                : ''}
-                              {p.designation}
-                            </option>
-                          ))}
-                        </select>
                         <Button
                           type="button"
                           variant="ghost"
@@ -1078,18 +1293,14 @@ export function FactureForm({
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-8 gap-2">
                         <div className="col-span-2">
-                          <Input
-                            ref={(el) => { designationRefs.current[index] = el }}
+                          <ProduitAutocomplete
                             value={ligne.designation}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                designation: e.target.value,
-                              })
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') { e.preventDefault(); addLigne('produit') }
-                            }}
-                            placeholder="Désignation"
+                            produits={produits}
+                            onChange={(designation) => updateLigne(index, { designation, produit_id: null })}
+                            onSelect={(p) => selectProduit(index, p.id)}
+                            onAddLine={() => addLigne('produit')}
+                            inputRef={(el) => { designationRefs.current[index] = el }}
+                            placeholder="Produit ou désignation libre — tapez pour rechercher"
                           />
                         </div>
                         <div>
@@ -1112,6 +1323,7 @@ export function FactureForm({
                             <option value="m2">m²</option>
                             <option value="m3">m³</option>
                             <option value="ml">ml</option>
+                            <option value="km">km</option>
                             <option value="lot">lot</option>
                             <option value="kg">kg</option>
                             <option value="l">L</option>
@@ -1136,11 +1348,13 @@ export function FactureForm({
                             type="button"
                             onClick={() => updateLigne(index, {
                               remise_type: ligne.remise_type === 'pct' ? 'montant' : 'pct',
-                              remise_pct: 0,
-                              remise_montant: 0,
                             })}
-                            className="shrink-0 px-2 text-xs border rounded-md bg-muted hover:bg-muted/80 font-medium"
-                            title="Basculer % / €"
+                            className={`shrink-0 px-2 text-xs border rounded-md font-bold transition-colors ${
+                              ligne.remise_type === 'montant'
+                                ? 'bg-[#F5B400] text-[#0A0A0B] border-[#F5B400] hover:bg-[#D89A00]'
+                                : 'bg-muted hover:bg-muted/80'
+                            }`}
+                            title={`Mode actuel : ${ligne.remise_type === 'pct' ? 'pourcentage (%)' : 'montant (€)'} — cliquez pour basculer`}
                           >
                             {ligne.remise_type === 'pct' ? '%' : '€'}
                           </button>
@@ -1164,15 +1378,16 @@ export function FactureForm({
                         </div>
                       </div>
                       <div className="pl-7">
-                        <Input
+                        <Textarea
                           value={ligne.description}
                           onChange={(e) =>
                             updateLigne(index, {
                               description: e.target.value,
                             })
                           }
-                          placeholder="Description (optionnel)"
-                          className="text-muted-foreground text-xs"
+                          rows={1}
+                          placeholder="Description (optionnel) — supporte sauts de ligne, **gras**, *italique*, - puces"
+                          className="text-muted-foreground text-xs min-h-9"
                         />
                       </div>
                     </div>
@@ -1206,7 +1421,7 @@ export function FactureForm({
               <Button
                 type="button"
                 size="sm"
-                className="bg-[#141414] hover:bg-[#141414]/90"
+                className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
                 onClick={() => addLigne('produit')}
               >
                 <Plus className="h-4 w-4 mr-1" />
@@ -1305,7 +1520,7 @@ export function FactureForm({
               <Button
                 type="button"
                 size="sm"
-                className="bg-[#141414] hover:bg-[#141414]/90"
+                className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
                 onClick={() => setPaiementDialogOpen(true)}
                 disabled={facture.statut === 'payee'}
               >
@@ -1432,9 +1647,55 @@ export function FactureForm({
             ) : (
               <Send className="h-4 w-4 mr-2" />
             )}
-            {facture.statut === 'brouillon' ? 'Envoyer au client' : 'Renvoyer au client'}
+            {facture.statut === 'brouillon' ? 'Envoyer par email' : 'Renvoyer par email'}
           </Button>
         )}
+        {isEdit && facture && facture.type !== 'acompte' && (() => {
+          const clientData = localClients.find((c: Client) => c.id === clientId)
+          const isPro = clientData?.type === 'professionnel'
+          const dejaPeppol = facture.peppol_statut === 'envoye' || facture.peppol_statut === 'recu'
+          const enEchec = facture.peppol_statut === 'echec'
+          return (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!isPro || peppolSending}
+              title={
+                !isPro
+                  ? 'Peppol : clients B2B (professionnels) uniquement'
+                  : enEchec
+                  ? `Echec du precedent envoi : ${facture.peppol_error || 'erreur inconnue'}`
+                  : dejaPeppol
+                  ? `Deja envoyee via Peppol${facture.peppol_sent_at ? ' le ' + new Date(facture.peppol_sent_at).toLocaleDateString('fr-BE') : ''}`
+                  : ''
+              }
+              onClick={async () => {
+                if (!facture?.id) return
+                if (dejaPeppol && !confirm('Cette facture a deja ete envoyee via Peppol. Renvoyer ?')) return
+                setPeppolSending(true)
+                try {
+                  const res = await fetch(`/api/peppol/${facture.id}/send`, { method: 'POST' })
+                  const data = await res.json()
+                  if (!res.ok) toast.error(data.error || 'Erreur Peppol')
+                  else toast.success(data.test_mode ? 'Envoye via Peppol (mode test)' : 'Envoye via Peppol')
+                } catch {
+                  toast.error('Erreur reseau')
+                }
+                setPeppolSending(false)
+              }}
+              className={
+                enEchec
+                  ? 'border-red-300 text-red-700 hover:bg-red-50'
+                  : 'border-[#F5B400]/50 text-[#D89A00] hover:bg-[#F5B400]/10'
+              }
+            >
+              {peppolSending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+              {enEchec ? 'Reessayer Peppol' : dejaPeppol ? 'Renvoyer via Peppol' : 'Envoyer via Peppol'}
+              {!isPro && <span className="ml-2 text-[10px] text-muted-foreground">(B2B uniquement)</span>}
+              {dejaPeppol && <span className="ml-2 text-[10px] text-emerald-600">✓</span>}
+            </Button>
+          )
+        })()}
         {!isEdit && (
           <div className="flex items-center gap-3 mr-auto">
             <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -1463,7 +1724,7 @@ export function FactureForm({
         )}
         <Button
           onClick={handleSave}
-          className={acquittee && !isEdit ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#141414] hover:bg-[#141414]/90'}
+          className={acquittee && !isEdit ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#0B0B0D] hover:bg-[#1F1F23] text-white'}
           disabled={saving}
         >
           {saving ? (
@@ -1502,7 +1763,7 @@ export function FactureForm({
             <AlertDialogAction
               onClick={handleEnvoyer}
               disabled={sending}
-              className="bg-[#141414] hover:bg-[#141414]/90"
+              className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
             >
               {sending ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
