@@ -230,9 +230,12 @@ export function FactureForm({
   const [acomptePct, setAcomptePct] = useState<number>(facture?.acompte_pct ?? 30)
   const [devisTotalTTC, setDevisTotalTTC] = useState<number>(0)
   const [devisAvgTva, setDevisAvgTva] = useState<number>(21)
+  const [devisHasMultipleTva, setDevisHasMultipleTva] = useState<boolean>(false)
   // Acomptes deja emis sur le devis (factures de type 'acompte' liees au meme devis)
-  type AcompteExistant = { id: string; numero: string; total_ttc: number; date_facture: string }
+  type AcompteExistant = { id: string; numero: string; total_ttc: number; date_facture: string; acompte_numero?: number | null }
   const [acomptesExistants, setAcomptesExistants] = useState<AcompteExistant[]>([])
+  // Ref stable pour le numéro du prochain acompte (lu dans handleAutoSave sans stale closure)
+  const acompteNumeroRef = useRef<number>(1)
   // Pour la facture finale (solde)
   const [isFactureFinale, setIsFactureFinale] = useState(false)
 
@@ -353,15 +356,17 @@ export function FactureForm({
   const fetchAcomptesExistants = async (selectedDevisId: string) => {
     const query = supabase
       .from('factures')
-      .select('id, numero, total_ttc, date_facture')
+      .select('id, numero, total_ttc, date_facture, acompte_numero')
       .eq('devis_id', selectedDevisId)
       .eq('type', 'acompte')
       .is('archived_at', null)
-      .order('date_facture', { ascending: true })
+      .order('acompte_numero', { ascending: true })
     const { data } = facture?.id
       ? await query.neq('id', facture.id)
       : await query
-    setAcomptesExistants((data || []) as AcompteExistant[])
+    const list = (data || []) as AcompteExistant[]
+    setAcomptesExistants(list)
+    acompteNumeroRef.current = list.length + 1
   }
 
   // Import lines from devis
@@ -392,13 +397,22 @@ export function FactureForm({
     }
 
     if (devisLignes && devisLignes.length > 0) {
-      // Calcul TVA moyen pondéré depuis les lignes produit
-      const produitLines = devisLignes.filter(l => l.type === 'produit' && l.total_ht > 0)
+      // TVA depuis les lignes produit du devis
+      const produitLines = devisLignes.filter(l => l.type === 'produit')
       if (produitLines.length > 0) {
-        const totalHT = produitLines.reduce((s, l) => s + l.total_ht, 0)
-        const totalTVA = produitLines.reduce((s, l) => s + l.total_ht * l.taux_tva / 100, 0)
-        const avgTva = totalHT > 0 ? Math.round(totalTVA / totalHT * 100) : 21
-        setDevisAvgTva(avgTva)
+        const tvaRates = [...new Set(produitLines.map(l => l.taux_tva))]
+        if (tvaRates.length === 1) {
+          // Un seul taux → on l'utilise directement (pas de moyenne)
+          setDevisAvgTva(tvaRates[0])
+          setDevisHasMultipleTva(false)
+        } else {
+          // Plusieurs taux → moyenne pondérée + avertissement
+          const totalHT = produitLines.reduce((s, l) => s + (l.total_ht || 0), 0)
+          const totalTVA = produitLines.reduce((s, l) => s + (l.total_ht || 0) * l.taux_tva / 100, 0)
+          const avgTva = totalHT > 0 ? Math.round(totalTVA / totalHT * 100) : (tvaRates[0] ?? 21)
+          setDevisAvgTva(avgTva)
+          setDevisHasMultipleTva(true)
+        }
       }
 
       const importedLignes: LigneForm[] = devisLignes
@@ -569,7 +583,12 @@ export function FactureForm({
         })
         const { data: newFacture, error } = await supabase
           .from('factures')
-          .insert({ ...factureData, entreprise_id: utilisateur.entreprise_id, numero: numResult as string })
+          .insert({
+            ...factureData,
+            entreprise_id: utilisateur.entreprise_id,
+            numero: numResult as string,
+            ...(v.typeFacture === 'acompte' ? { acompte_numero: acompteNumeroRef.current } : {}),
+          })
           .select().single()
         if (error) throw error
         targetId = newFacture.id
@@ -1020,10 +1039,11 @@ export function FactureForm({
                     <>
                       <div className="border-t border-orange-100 my-2" />
                       <div className="text-muted-foreground font-medium">Acomptes déjà émis ({acomptesExistants.length}) :</div>
-                      {acomptesExistants.map((a) => (
-                        <div key={a.id} className="flex items-center justify-between pl-2">
-                          <span className="font-mono">{a.numero}</span>
-                          <span>{formatMontant(Number(a.total_ttc))}</span>
+                      {acomptesExistants.map((a, i) => (
+                        <div key={a.id} className="flex items-center justify-between pl-2 gap-2">
+                          <span className="text-muted-foreground shrink-0">Acompte n°{a.acompte_numero ?? (i + 1)}</span>
+                          <span className="font-mono text-[11px]">{a.numero}</span>
+                          <span className="font-medium">{formatMontant(Number(a.total_ttc))}</span>
                         </div>
                       ))}
                       <div className="flex items-center justify-between pt-1 border-t border-orange-100 mt-1">
@@ -1082,8 +1102,13 @@ export function FactureForm({
                   </span>
                   <span className="text-xs text-muted-foreground">
                     TVA appliquée : <span className="font-medium text-foreground">{devisAvgTva}%</span>
-                    {devisAvgTva !== 21 && <span className="text-orange-600 ml-1">(taux du devis)</span>}
+                    {!devisHasMultipleTva && devisAvgTva !== 21 && <span className="text-orange-600 ml-1">(taux du devis)</span>}
                   </span>
+                  {devisHasMultipleTva && (
+                    <span className="text-xs text-orange-600 font-medium">
+                      ⚠ Devis multi-taux TVA — TVA moyenne pondérée appliquée. Vérifiez votre comptabilité.
+                    </span>
+                  )}
                 </div>
               )}
               <Button
@@ -1103,10 +1128,11 @@ export function FactureForm({
                     : Math.round(baseInitial * acomptePct / 100 * 100) / 100
                   const montantHT = Math.round(montantTTC / (1 + tva / 100) * 100) / 100
                   const devisNumero = devisAcceptes.find((d) => d.id === devisId)?.numero || ''
+                  const nextNum = acomptesExistants.length + 1
                   const label = isFactureFinale
                     ? `Solde sur devis ${devisNumero}`
                     : devisId
-                    ? `Acompte sur devis ${devisNumero}`
+                    ? `Acompte n°${nextNum} sur devis ${devisNumero} — ${acomptePct}%`
                     : `Acompte ${acomptePct}% sur travaux`
                   // Description listant les acomptes precedents (uniquement pour la finale)
                   const description = isFactureFinale && acomptesExistants.length > 0

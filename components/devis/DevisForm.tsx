@@ -3,7 +3,10 @@
 import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Devis, DevisLigne, Client, Produit, AcompteConfig } from '@/types/database'
+import { ProduitAutocomplete } from '@/components/produits/ProduitAutocomplete'
 import { calculerLigne, calculerTotauxAvecRemiseGlobale, formatMontant, isExonerationIntracom, MENTION_EXONERATION_INTRACOM } from '@/lib/utils'
+import { getErrorMessage } from '@/lib/errors'
+import { validateLignesForDB, validateTotaux, emergencyBackup, clearEmergencyBackup } from '@/lib/safe-save'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -166,6 +169,29 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
   const [adresseChantier, setAdresseChantier] = useState(
     devis?.adresse_chantier || ''
   )
+  // Adresses enregistrees du client (siege + sites) pour l'autocomplete de l'adresse d'intervention
+  const [clientAdresses, setClientAdresses] = useState<{ libelle: string; adresse: string; code_postal: string; ville: string }[]>([])
+  useEffect(() => {
+    if (!clientId) {
+      setClientAdresses([])
+      return
+    }
+    supabase
+      .from('client_adresses')
+      .select('libelle, adresse, code_postal, ville')
+      .eq('client_id', clientId)
+      .order('created_at')
+      .then(({ data }) =>
+        setClientAdresses(
+          (data || []).map((a) => ({
+            libelle: a.libelle || '',
+            adresse: a.adresse || '',
+            code_postal: a.code_postal || '',
+            ville: a.ville || '',
+          }))
+        )
+      )
+  }, [clientId, supabase])
   const [dateDevis, setDateDevis] = useState(
     devis?.date_devis || new Date().toISOString().split('T')[0]
   )
@@ -195,6 +221,12 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
   const [remiseGlobaleLibelle, setRemiseGlobaleLibelle] = useState(
     devis?.remise_globale_libelle || ''
   )
+
+  // Correction globale : outil one-shot qui diminue le prix unitaire de chaque ligne produit
+  // Transparente pour le client : les prix affiches sur le PDF sont les prix reduits, sans mention de remise.
+  const [correctionPct, setCorrectionPct] = useState<number>(0)
+  // Memorise la derniere correction pour pouvoir l'annuler (ephemere, perdu au reload)
+  const [lastCorrectionPct, setLastCorrectionPct] = useState<number | null>(null)
 
   // --- Acomptes state ---
   const [acomptes, setAcomptes] = useState<AcompteConfig[]>(
@@ -258,20 +290,40 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
     []
   )
 
-  const designationRefs = useRef<(HTMLInputElement | null)[]>([])
-  const [shouldFocusLast, setShouldFocusLast] = useState(false)
+  const designationRefs = useRef<(HTMLTextAreaElement | null)[]>([])
+  const [focusIndex, setFocusIndex] = useState<number | null>(null)
 
   useEffect(() => {
-    if (shouldFocusLast) {
-      setShouldFocusLast(false)
-      const lastIndex = lignes.length - 1
-      if (lastIndex >= 0) designationRefs.current[lastIndex]?.focus()
+    if (focusIndex !== null) {
+      const idx = focusIndex
+      setFocusIndex(null)
+      if (idx >= 0 && idx < lignes.length) designationRefs.current[idx]?.focus()
     }
   })
 
-  const addLigne = (type: LigneForm['type'] = 'produit') => {
-    setLignes((prev) => [...prev, { ...createEmptyLigne(type), _uid: genLigneUid() }])
-    setShouldFocusLast(true)
+  const addLigne = (type: LigneForm['type'] = 'produit', afterIndex?: number) => {
+    setLignes((prev) => {
+      const newLigne = { ...createEmptyLigne(type), _uid: genLigneUid() }
+      // Si pas d'index fourni, append a la fin
+      if (afterIndex === undefined) {
+        setFocusIndex(prev.length)
+        return [...prev, newLigne]
+      }
+      // Sinon insere juste apres l'index donne
+      // Si l'index pointe sur une section, on cherche la fin de cette section
+      // (avant la prochaine section ou la fin du tableau)
+      let insertAt = afterIndex + 1
+      if (prev[afterIndex]?.type === 'section') {
+        for (let i = afterIndex + 1; i < prev.length; i++) {
+          if (prev[i].type === 'section') break
+          insertAt = i + 1
+        }
+      }
+      const next = [...prev]
+      next.splice(insertAt, 0, newLigne)
+      setFocusIndex(insertAt)
+      return next
+    })
   }
 
   const removeLigne = (index: number) => {
@@ -368,13 +420,65 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
       pieces_jointes: v.piecesJointes.length > 0 ? v.piecesJointes : [],
     }
 
+    // === GARDE-FOU 1 : validation numeric(12,2) AVANT toute écriture ===
+    const validationError = validateLignesForDB(v.lignes)
+    if (validationError) {
+      console.warn('[autosave] validation rejected:', validationError)
+      setAutoSaveStatus('error')
+      setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
+      return
+    }
+    const totauxError = validateTotaux(totauxCalc.totalHT, totauxCalc.totalTVA, totauxCalc.totalTTC)
+    if (totauxError) {
+      console.warn('[autosave] totaux rejected:', totauxError)
+      setAutoSaveStatus('error')
+      setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
+      return
+    }
+
     try {
       let targetId = autoSaveIdRef.current
 
       if (targetId) {
+        // ⚠️ GARDE-FOU 2 : si la liste de lignes en memoire est vide alors qu'on edite
+        // un devis existant, on REFUSE l'autosave pour eviter une perte de donnees
+        // (bug d'etat React transitoire qui causait le wipe des lignes en BDD).
+        // L'utilisateur peut toujours forcer en faisant un save manuel.
+        if (v.lignes.length === 0) {
+          console.warn('[autosave] lignes vide — skip pour eviter perte de donnees')
+          setAutoSaveStatus('idle')
+          return
+        }
+
+        // GARDE-FOU 3 : backup local AVANT toute écriture
+        emergencyBackup('devis', targetId, { devisData, lignes: v.lignes }, { numero: devis?.numero, totalTTC: totauxCalc.totalTTC })
+
         const { error } = await supabase.from('devis').update(devisData).eq('id', targetId)
         if (error) throw error
-        await supabase.from('devis_lignes').delete().eq('devis_id', targetId)
+
+        // GARDE-FOU 4 : RPC atomique (DELETE+INSERT en transaction Postgres,
+        // rollback automatique si une seule ligne échoue → plus jamais de wipe)
+        const lignesPayload = v.lignes.map((l, i) => ({
+          ordre: i,
+          type: l.type,
+          produit_id: l.produit_id || null,
+          designation: l.designation || null,
+          description: l.description || null,
+          quantite: l.quantite,
+          unite: l.unite,
+          prix_unitaire_ht: l.prix_unitaire_ht,
+          remise_type: l.remise_type,
+          remise_pct: l.remise_pct,
+          remise_montant: l.remise_montant,
+          taux_tva: l.taux_tva,
+          total_ht: l.total_ht,
+          is_option: l.is_option,
+        }))
+        const { error: rpcErr } = await supabase.rpc('replace_devis_lignes', {
+          p_devis_id: targetId,
+          p_lignes: lignesPayload,
+        })
+        if (rpcErr) throw rpcErr
       } else {
         const { data: authData } = await supabase.auth.getUser()
         if (!authData.user) throw new Error('Non authentifié')
@@ -396,29 +500,34 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
         targetId = newDevis.id
         autoSaveIdRef.current = targetId
         window.history.replaceState(null, '', `/devis/${targetId}`)
+
+        if (v.lignes.length > 0) {
+          const lignesPayload = v.lignes.map((l, i) => ({
+            ordre: i,
+            type: l.type,
+            produit_id: l.produit_id || null,
+            designation: l.designation || null,
+            description: l.description || null,
+            quantite: l.quantite,
+            unite: l.unite,
+            prix_unitaire_ht: l.prix_unitaire_ht,
+            remise_type: l.remise_type,
+            remise_pct: l.remise_pct,
+            remise_montant: l.remise_montant,
+            taux_tva: l.taux_tva,
+            total_ht: l.total_ht,
+            is_option: l.is_option,
+          }))
+          const { error: rpcErr } = await supabase.rpc('replace_devis_lignes', {
+            p_devis_id: targetId,
+            p_lignes: lignesPayload,
+          })
+          if (rpcErr) throw rpcErr
+        }
       }
 
-      if (v.lignes.length > 0 && targetId) {
-        const lignesData = v.lignes.map((l, i) => ({
-          devis_id: targetId,
-          ordre: i,
-          type: l.type,
-          produit_id: l.produit_id || null,
-          designation: l.designation || null,
-          description: l.description || null,
-          quantite: l.quantite,
-          unite: l.unite,
-          prix_unitaire_ht: l.prix_unitaire_ht,
-          remise_type: l.remise_type,
-          remise_pct: l.remise_pct,
-          remise_montant: l.remise_montant,
-          taux_tva: l.taux_tva,
-          total_ht: l.total_ht,
-          is_option: l.is_option,
-        }))
-        const { error: lignesError } = await supabase.from('devis_lignes').insert(lignesData)
-        if (lignesError) throw lignesError
-      }
+      // Succès → on peut supprimer le backup local
+      if (targetId) clearEmergencyBackup('devis', targetId)
 
       setAutoSaveStatus('saved')
       setTimeout(() => setAutoSaveStatus(s => s === 'saved' ? 'idle' : s), 3000)
@@ -427,7 +536,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
       setAutoSaveStatus('error')
       setTimeout(() => setAutoSaveStatus(s => s === 'error' ? 'idle' : s), 5000)
     }
-  }, [supabase])
+  }, [supabase, devis?.numero])
 
   // Trigger auto-save 3s after any form change
   useEffect(() => {
@@ -457,6 +566,18 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
     }
     if (lignes.length === 0) {
       toast.error('Ajoutez au moins une ligne au devis')
+      return
+    }
+
+    // === GARDE-FOU 1 : validation numeric(12,2) AVANT toute écriture ===
+    const validationError = validateLignesForDB(lignes)
+    if (validationError) {
+      toast.error(validationError, { duration: 10000 })
+      return
+    }
+    const totauxError = validateTotaux(totaux.totalHT, totaux.totalTVA, totaux.totalTTC)
+    if (totauxError) {
+      toast.error(totauxError, { duration: 10000 })
       return
     }
 
@@ -495,14 +616,32 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
       let devisId = devis?.id || autoSaveIdRef.current
 
       if (devisId) {
+        // Garde-fou anti-perte de donnees : si lignes vide, demander confirmation
+        if (lignes.length === 0) {
+          const { count } = await supabase
+            .from('devis_lignes')
+            .select('*', { count: 'exact', head: true })
+            .eq('devis_id', devisId)
+          if ((count || 0) > 0) {
+            const ok = window.confirm(
+              `⚠️ Ce devis contient ${count} ligne(s) en base mais vous etes sur le point de sauvegarder un devis VIDE. Confirmer la suppression de toutes les lignes ?`
+            )
+            if (!ok) {
+              setSaving(false)
+              return
+            }
+          }
+        }
+
+        // GARDE-FOU 2 : backup local AVANT toute écriture
+        emergencyBackup('devis', devisId, { devisData, lignes }, { numero: devis?.numero, totalTTC: totaux.totalTTC })
+
         const { error } = await supabase
           .from('devis')
           .update(devisData)
           .eq('id', devisId)
         if (error) throw error
-
-        // Delete existing lines then re-insert
-        await supabase.from('devis_lignes').delete().eq('devis_id', devisId)
+        // Pas de DELETE ici : c'est la RPC atomique qui s'en occupe en transaction
       } else {
         // Get user's entreprise_id
         const { data: authData } = await supabase.auth.getUser()
@@ -542,9 +681,10 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
         devisId = newDevis.id
       }
 
-      // Insert all lines
-      const lignesData = lignes.map((l, i) => ({
-        devis_id: devisId!,
+      // GARDE-FOU 3 : RPC atomique (DELETE+INSERT en transaction Postgres)
+      // Si une seule ligne échoue (overflow, contrainte), Postgres ROLLBACK
+      // automatiquement → les lignes existantes ne sont JAMAIS perdues.
+      const lignesPayload = lignes.map((l, i) => ({
         ordre: i,
         type: l.type,
         produit_id: l.produit_id || null,
@@ -560,18 +700,29 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
         total_ht: l.total_ht,
         is_option: l.is_option,
       }))
+      const { error: rpcErr } = await supabase.rpc('replace_devis_lignes', {
+        p_devis_id: devisId!,
+        p_lignes: lignesPayload,
+      })
+      if (rpcErr) throw rpcErr
 
-      const { error: lignesError } = await supabase
-        .from('devis_lignes')
-        .insert(lignesData)
-      if (lignesError) throw lignesError
+      // Succès → on peut supprimer le backup local d'urgence
+      if (devisId) clearEmergencyBackup('devis', devisId)
 
       toast.success(isEdit ? 'Devis modifié avec succès' : 'Devis créé avec succès')
       router.push('/devis')
       router.refresh()
     } catch (err) {
       console.error(err)
-      toast.error('Erreur lors de la sauvegarde')
+      const msg = getErrorMessage(err)
+      if (msg.toLowerCase().includes('overflow') || msg.toLowerCase().includes('numeric')) {
+        toast.error(
+          'Erreur : un montant tapé est trop grand (max 100 000 000 €). Vos lignes ont été préservées — corrigez la valeur et réessayez.',
+          { duration: 12000 }
+        )
+      } else {
+        toast.error(`Erreur lors de la sauvegarde : ${msg}`, { duration: 8000 })
+      }
     }
 
     setSaving(false)
@@ -629,7 +780,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
         <div className="flex items-center gap-3 rounded-2xl border border-[#EBEBEB]/60 bg-[#F5F5F5] px-5 py-4">
           <Lock className="h-5 w-5 text-[#ADADAD] shrink-0" />
           <div>
-            <p className="text-[14px] font-medium text-[#141414]">
+            <p className="text-[14px] font-medium text-[#0A0A0B]">
               Ce devis a été signé et ne peut plus être modifié.
             </p>
             <p className="text-[13px] text-[#707070]">
@@ -782,17 +933,47 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
             <Input
               value={adresseChantier}
               onChange={(e) => setAdresseChantier(e.target.value)}
-              placeholder="Ex: Rue de la Loi 16, 7500 Tournai"
+              placeholder="Choisir une adresse du client ou saisir librement"
               disabled={isReadOnly}
+              list="devis-adresses-intervention"
             />
+            <datalist id="devis-adresses-intervention">
+              {(() => {
+                const sel = localClients.find((c) => c.id === clientId)
+                const fmt = (adr?: string | null, cp?: string | null, ville?: string | null) =>
+                  [adr, [cp, ville].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+                const opts: { label: string; value: string }[] = []
+                if (sel?.adresse) {
+                  opts.push({ label: `Siege — ${sel.raison_sociale || sel.nom || ''}`.trim(), value: fmt(sel.adresse, sel.code_postal, sel.ville) })
+                }
+                clientAdresses.forEach((a) => {
+                  if (a.adresse) opts.push({ label: a.libelle || 'Site', value: fmt(a.adresse, a.code_postal, a.ville) })
+                })
+                return opts.map((o, i) => (
+                  <option key={i} value={o.value}>
+                    {o.label}
+                  </option>
+                ))
+              })()}
+            </datalist>
+            {(clientAdresses.length > 0 || localClients.find((c) => c.id === clientId)?.adresse) && (
+              <p className="text-[11px] text-[#9CA3AF]">
+                Astuce : tapez ou cliquez pour choisir parmi les adresses enregistrees du client.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Conditions de paiement</Label>
-            <Input
+            <Textarea
+              rows={4}
               value={conditionsPaiement}
               onChange={(e) => setConditionsPaiement(e.target.value)}
               disabled={isReadOnly}
+              placeholder={'Comptant\n\nou\n\n**Échéancier :**\n- 30% à la signature\n- 40% au début\n- 30% à la fin'}
             />
+            <p className="text-[11px] text-[#6B7280]">
+              Mise en forme : sauts de ligne, <code>- puce</code>, <code>**gras**</code>, <code>*italique*</code>.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Date du devis</Label>
@@ -869,7 +1050,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                 <Button
                   type="button"
                   size="sm"
-                  className="bg-[#141414] hover:bg-[#141414]/90"
+                  className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
                   onClick={() => addLigne('produit')}
                 >
                   <Plus className="h-4 w-4 mr-1" />
@@ -889,12 +1070,13 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
               <SortableContext items={lignes.map(l => l._uid ?? String(l.id))} strategy={verticalListSortingStrategy}>
             <div className="space-y-3">
               {/* En-têtes colonnes */}
-              <div className="hidden md:grid md:grid-cols-7 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
+              <div className="hidden md:grid md:grid-cols-8 gap-2 px-3 pl-10 text-xs text-muted-foreground font-medium">
                 <div className="col-span-2">Désignation</div>
                 <div>Qté</div>
                 <div>Unité</div>
                 <div>PU HT</div>
                 <div>Remise</div>
+                <div>TVA</div>
                 <div className="text-right">Total HT</div>
               </div>
               {lignes.map((ligne, index) => {
@@ -926,13 +1108,13 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1 flex items-center gap-2">
                         {ligneNums[index] ? (
-                          <span className="text-sm font-bold text-[#1B3A6B] shrink-0 min-w-[1.5rem] tabular-nums">
+                          <span className="text-sm font-bold text-[#0B0B0D] shrink-0 min-w-[1.5rem] tabular-nums">
                             {ligneNums[index]}
                           </span>
                         ) : (
                           <span className="text-xs font-medium uppercase text-muted-foreground shrink-0">Section</span>
                         )}
-                        <Input
+                        <Textarea
                           ref={(el) => { designationRefs.current[index] = el }}
                           value={ligne.designation}
                           onChange={(e) =>
@@ -941,28 +1123,42 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                             })
                           }
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !isReadOnly) { e.preventDefault(); addLigne('produit') }
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isReadOnly) { e.preventDefault(); addLigne('produit') }
                           }}
-                          className="font-semibold"
-                          placeholder="Titre de la section"
+                          rows={1}
+                          className="font-semibold min-h-9"
+                          placeholder="Titre de la section (Cmd+Enter pour ajouter une ligne)"
                           disabled={isReadOnly}
                         />
                       </div>
                       {!isReadOnly && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeLigne(index)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => addLigne('produit', index)}
+                            className="h-8 text-xs"
+                            title="Ajouter une ligne dans cette section"
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Ligne
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeLigne(index)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </div>
                       )}
                     </div>
                   ) : ligne.type === 'texte' ? (
                     /* ---- TEXTE ---- */
                     <div className="flex items-start gap-3">
-                      <GripVertical className="h-4 w-4 text-muted-foreground mt-2 shrink-0" />
+                      <GripVertical className="h-4 w-4 text-muted-foreground mt-2 shrink-0 cursor-grab" {...dragHandleProps} />
                       <div className="flex-1">
                         <span className="text-xs font-medium uppercase text-muted-foreground mb-1 block">
                           Texte libre
@@ -994,30 +1190,12 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                     /* ---- PRODUIT ---- */
                     <div className="space-y-3">
                       <div className="flex items-center gap-3">
-                        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab" {...dragHandleProps} />
                         {ligneNums[index] && (
                           <span className="text-xs font-mono font-semibold text-[#6B7280] w-7 shrink-0 tabular-nums">
                             {ligneNums[index]}
                           </span>
                         )}
-                        <select
-                          value={ligne.produit_id || ''}
-                          onChange={(e) =>
-                            selectProduit(index, e.target.value)
-                          }
-                          disabled={isReadOnly}
-                          className="flex h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <option value="">Produit du catalogue...</option>
-                          {produits.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.reference
-                                ? `${p.reference} - `
-                                : ''}
-                              {p.designation}
-                            </option>
-                          ))}
-                        </select>
                         {!isReadOnly && (
                           <div className="ml-auto flex items-center gap-1">
                             <button
@@ -1043,21 +1221,17 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                           </div>
                         )}
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-8 gap-2">
                         <div className="col-span-2">
-                          <Input
-                            ref={(el) => { designationRefs.current[index] = el }}
+                          <ProduitAutocomplete
                             value={ligne.designation}
-                            onChange={(e) =>
-                              updateLigne(index, {
-                                designation: e.target.value,
-                              })
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !isReadOnly) { e.preventDefault(); addLigne('produit') }
-                            }}
-                            placeholder="Désignation"
+                            produits={produits}
+                            onChange={(designation) => updateLigne(index, { designation, produit_id: null })}
+                            onSelect={(p) => selectProduit(index, p.id)}
+                            onAddLine={() => addLigne('produit')}
                             disabled={isReadOnly}
+                            inputRef={(el) => { designationRefs.current[index] = el }}
+                            placeholder="Produit ou désignation libre — tapez pour rechercher"
                           />
                         </div>
                         <div>
@@ -1082,6 +1256,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                             <option value="m2">m²</option>
                             <option value="m3">m³</option>
                             <option value="ml">ml</option>
+                            <option value="km">km</option>
                             <option value="lot">lot</option>
                             <option value="kg">kg</option>
                             <option value="l">L</option>
@@ -1109,15 +1284,30 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                               type="button"
                               onClick={() => updateLigne(index, {
                                 remise_type: ligne.remise_type === 'pct' ? 'montant' : 'pct',
-                                remise_pct: 0,
-                                remise_montant: 0,
                               })}
-                              className="shrink-0 px-2 text-xs border rounded-md bg-muted hover:bg-muted/80 font-medium"
-                              title="Basculer % / €"
+                              className={`shrink-0 px-2 text-xs border rounded-md font-bold transition-colors ${
+                                ligne.remise_type === 'montant'
+                                  ? 'bg-[#F5B400] text-[#0A0A0B] border-[#F5B400] hover:bg-[#D89A00]'
+                                  : 'bg-muted hover:bg-muted/80'
+                              }`}
+                              title={`Mode actuel : ${ligne.remise_type === 'pct' ? 'pourcentage (%)' : 'montant (€)'} — cliquez pour basculer`}
                             >
                               {ligne.remise_type === 'pct' ? '%' : '€'}
                             </button>
                           )}
+                        </div>
+                        <div>
+                          <select
+                            value={ligne.taux_tva}
+                            onChange={(e) => updateLigne(index, { taux_tva: parseFloat(e.target.value) })}
+                            disabled={isReadOnly}
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs disabled:opacity-50"
+                          >
+                            <option value={0}>0%</option>
+                            <option value={6}>6%</option>
+                            <option value={12}>12%</option>
+                            <option value={21}>21%</option>
+                          </select>
                         </div>
                         <div className="flex flex-col items-end justify-center">
                           <span className={`font-mono text-sm font-medium ${ligne.is_option ? 'text-amber-600' : ''}`}>
@@ -1130,15 +1320,16 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                       </div>
                       {/* Description row */}
                       <div className="pl-7">
-                        <Input
+                        <Textarea
                           value={ligne.description}
                           onChange={(e) =>
                             updateLigne(index, {
                               description: e.target.value,
                             })
                           }
-                          placeholder="Description (optionnel)"
-                          className="text-muted-foreground text-xs"
+                          rows={1}
+                          placeholder="Description (optionnel) — supporte sauts de ligne, **gras**, *italique*, - puces"
+                          className="text-muted-foreground text-xs min-h-9"
                           disabled={isReadOnly}
                         />
                       </div>
@@ -1183,7 +1374,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
               <Button
                 type="button"
                 size="sm"
-                className="bg-[#141414] hover:bg-[#141414]/90"
+                className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
                 onClick={() => addLigne('produit')}
               >
                 <Plus className="h-4 w-4 mr-1" />
@@ -1237,6 +1428,77 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
               <div className="flex justify-between w-64 text-[#DC2626]">
                 <span>Remise</span>
                 <span className="font-mono">-{formatMontant(totaux.remiseMontant)}</span>
+              </div>
+            )}
+            {/* === Correction transparente : diminue les prix unitaires de chaque ligne (invisible cote client) === */}
+            {!isReadOnly && (
+              <div className="flex flex-col gap-1 w-72 mt-2 pt-2 border-t border-dashed">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-sm shrink-0">Correction</span>
+                  <div className="flex gap-1 flex-1">
+                    <NumericInput
+                      value={correctionPct}
+                      onChange={setCorrectionPct}
+                      placeholder="Ex: 5"
+                      className="h-7 text-sm"
+                    />
+                    <span className="text-xs self-center text-muted-foreground">%</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs ml-1"
+                      disabled={correctionPct <= 0 || correctionPct >= 100}
+                      onClick={() => {
+                        const nbLignes = lignes.filter(l => l.type === 'produit').length
+                        if (nbLignes === 0) {
+                          toast.error('Aucune ligne produit a corriger')
+                          return
+                        }
+                        if (!confirm(`Diminuer le prix unitaire de chaque ligne (${nbLignes}) de ${correctionPct}% ? La modification est transparente pour le client (aucune remise visible sur le PDF).`)) return
+                        const factor = 1 - correctionPct / 100
+                        setLignes(prev => prev.map(l => {
+                          if (l.type !== 'produit') return l
+                          const newPu = Math.round(l.prix_unitaire_ht * factor * 100) / 100
+                          const remise = l.remise_type === 'montant' ? l.remise_montant : l.remise_pct
+                          const { ht } = calculerLigne(l.quantite, newPu, remise, l.taux_tva, l.remise_type)
+                          return { ...l, prix_unitaire_ht: newPu, total_ht: ht }
+                        }))
+                        setLastCorrectionPct(correctionPct)
+                        setCorrectionPct(0)
+                        toast.success(`Prix diminues de ${correctionPct}% sur ${nbLignes} ligne(s) — invisible pour le client`)
+                      }}
+                    >
+                      Appliquer
+                    </Button>
+                  </div>
+                </div>
+                {lastCorrectionPct !== null && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastCorrectionPct === null) return
+                      const inverseFactor = 1 / (1 - lastCorrectionPct / 100)
+                      const nbLignes = lignes.filter(l => l.type === 'produit').length
+                      if (!confirm(`Annuler la derniere correction de ${lastCorrectionPct}% ? Les prix unitaires seront restaures (peut perdre 1-2 centimes d'arrondi).`)) return
+                      setLignes(prev => prev.map(l => {
+                        if (l.type !== 'produit') return l
+                        const newPu = Math.round(l.prix_unitaire_ht * inverseFactor * 100) / 100
+                        const remise = l.remise_type === 'montant' ? l.remise_montant : l.remise_pct
+                        const { ht } = calculerLigne(l.quantite, newPu, remise, l.taux_tva, l.remise_type)
+                        return { ...l, prix_unitaire_ht: newPu, total_ht: ht }
+                      }))
+                      setLastCorrectionPct(null)
+                      toast.success(`Correction de ${lastCorrectionPct}% annulee sur ${nbLignes} ligne(s)`)
+                    }}
+                    className="text-[11px] text-[#F5B400] hover:underline self-start"
+                  >
+                    ↶ Annuler la derniere correction de {lastCorrectionPct}%
+                  </button>
+                )}
+                <p className="text-[10px] text-muted-foreground leading-tight">
+                  Diminue directement les prix unitaires de chaque ligne. <strong>Transparent pour le client</strong> : le PDF affiche simplement les prix reduits, sans mention de remise.
+                </p>
               </div>
             )}
             <div className="flex justify-between w-64">
@@ -1396,8 +1658,8 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
               </div>
 
               {/* Encadré conditions de paiement auto-généré */}
-              <div className="mt-4 rounded-lg border border-[#1B3A6B]/20 bg-[#F0F4FA] px-4 py-3 space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-[#1B3A6B]">
+              <div className="mt-4 rounded-lg border border-[#0B0B0D]/20 bg-[#F0F4FA] px-4 py-3 space-y-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[#0B0B0D]">
                   Conditions de paiement
                 </p>
                 {acomptes.map((a, i) => {
@@ -1405,17 +1667,17 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
                   const montant = formatMontant(Math.round(totaux.totalTTC * (a.pourcentage / 100) * 100) / 100)
                   const label = a.label ? ` — ${a.label}` : ''
                   return (
-                    <p key={i} className="text-[12px] text-[#1B3A6B]">
+                    <p key={i} className="text-[12px] text-[#0B0B0D]">
                       <span className="font-semibold">{ordinal} acompte : {a.pourcentage}%</span>
                       {label}
-                      <span className="font-mono ml-1 text-[#1B3A6B]/80">({montant})</span>
+                      <span className="font-mono ml-1 text-[#0B0B0D]/80">({montant})</span>
                     </p>
                   )
                 })}
                 {totalPourcentageAcomptes < 100 && (
-                  <p className="text-[12px] text-[#1B3A6B]">
+                  <p className="text-[12px] text-[#0B0B0D]">
                     <span className="font-semibold">Solde : {100 - totalPourcentageAcomptes}%</span>
-                    <span className="font-mono ml-1 text-[#1B3A6B]/80">
+                    <span className="font-mono ml-1 text-[#0B0B0D]/80">
                       ({formatMontant(Math.round(totaux.totalTTC * ((100 - totalPourcentageAcomptes) / 100) * 100) / 100)})
                     </span>
                   </p>
@@ -1509,19 +1771,29 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
           </Button>
         )}
         {isEdit && devis && (devis.statut === 'accepte' || devis.statut === 'envoye') && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push(`/factures/nouveau?devis=${devis.id}`)}
-          >
-            <FileOutput className="h-4 w-4 mr-2" />
-            Convertir en facture
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.push(`/factures/nouveau?devis=${devis.id}&type=acompte`)}
+            >
+              <Receipt className="h-4 w-4 mr-2" />
+              Générer un acompte
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.push(`/factures/nouveau?devis=${devis.id}`)}
+            >
+              <FileOutput className="h-4 w-4 mr-2" />
+              Convertir en facture
+            </Button>
+          </>
         )}
         {!isReadOnly && (
           <Button
             onClick={handleSave}
-            className="bg-[#141414] hover:bg-[#141414]/90"
+            className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
             disabled={saving}
           >
             {saving ? (
@@ -1549,7 +1821,7 @@ export function DevisForm({ devis, initialLignes, clients: initialClients, produ
             <AlertDialogAction
               onClick={handleEnvoyer}
               disabled={sending}
-              className="bg-[#141414] hover:bg-[#141414]/90"
+              className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
             >
               {sending ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
