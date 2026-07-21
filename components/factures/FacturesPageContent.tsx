@@ -23,6 +23,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import {
   AlertDialog,
@@ -51,11 +55,15 @@ import {
   CheckCircle2,
   Calendar,
   FileMinus,
+  Landmark,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useUser } from '@/lib/hooks/useUser'
 import { PaiementDialog } from './PaiementDialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
 
 const statutConfig: Record<string, { label: string; className: string }> = {
   brouillon: {
@@ -64,7 +72,7 @@ const statutConfig: Record<string, { label: string; className: string }> = {
   },
   envoyee: {
     label: 'Envoyee',
-    className: 'bg-[#17C2D7]/10 text-[#17C2D7]',
+    className: 'bg-[#F5B400]/10 text-[#F5B400]',
   },
   partiellement_payee: {
     label: 'Partiel',
@@ -82,8 +90,18 @@ const statutConfig: Record<string, { label: string; className: string }> = {
 
 type FactureWithClient = Facture & {
   client: Pick<Client, 'nom' | 'prenom' | 'raison_sociale' | 'type'> | null
+  devis?: { titre: string | null; reference_chantier: string | null } | null
   total_paye?: number
   taux_tva_list?: number[]
+  avoir_deduit_ttc?: number  // somme des avoirs émis sur cette facture
+}
+
+// Renvoie la meilleure reference disponible pour une facture
+// Priorite : titre du devis > reference_chantier du devis > rien
+function getFactureReference(f: FactureWithClient): string {
+  if (f.devis?.titre) return f.devis.titre
+  if (f.devis?.reference_chantier) return f.devis.reference_chantier
+  return ''
 }
 
 interface Props {
@@ -111,6 +129,9 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
   const [dateDebut, setDateDebut] = useState('')
   const [dateFin, setDateFin] = useState('')
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const [journalOpen, setJournalOpen] = useState(false)
+  const [jDebut, setJDebut] = useState(`${today.getFullYear()}-01-01`)
+  const [jFin, setJFin] = useState(todayStr)
   const [confirmSendId, setConfirmSendId] = useState<string | null>(null)
   const [paiementFacture, setPaiementFacture] = useState<FactureWithClient | null>(null)
   const [showArchives, setShowArchives] = useState(false)
@@ -118,6 +139,12 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
   const router = useRouter()
   const supabase = createClient()
   const { utilisateur } = useUser()
+
+  type AvoirLigne = { id: string; designation: string | null; total_ht: number; taux_tva: number; montant: number; checked: boolean }
+  const [avoirDialog, setAvoirDialog] = useState<FactureWithClient | null>(null)
+  const [avoirType, setAvoirType] = useState<'total' | 'partiel'>('total')
+  const [avoirLignes, setAvoirLignes] = useState<AvoirLigne[]>([])
+  const [avoirLoading, setAvoirLoading] = useState(false)
 
   const getClientName = (f: FactureWithClient): string => {
     if (!f.client) return '\u2014'
@@ -131,7 +158,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
 
   const filtered = facturesList.filter((f) => {
     const clientName = getClientName(f)
-    const matchSearch = [f.numero, clientName]
+    const matchSearch = [f.numero, clientName, getFactureReference(f)]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -143,22 +170,29 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
     return matchSearch && matchStatut && matchType && matchDateDebut && matchDateFin
   })
 
-  // Statistics computed on filtered results
+  // Statistics computed on filtered results (HTVA + TVA separes)
   const stats = useMemo(() => {
-    const totalFacture = filtered.reduce((sum, f) => sum + f.total_ttc, 0)
+    const totalFactureHT = filtered.reduce((sum, f) => sum + (Number(f.total_ht) || 0), 0)
+    const totalFactureTVA = filtered.reduce((sum, f) => sum + (Number(f.total_tva) || 0), 0)
+    // Paye et impaye restent en TTC (c'est ce qui compte pour la tresorerie)
     const totalPaye = filtered.reduce((sum, f) => {
       if (f.statut === 'payee') return sum + f.total_ttc
       return sum + (f.total_paye || 0)
     }, 0)
     const totalImpaye = filtered.reduce((sum, f) => {
       if (f.statut === 'payee' || f.statut === 'brouillon') return sum
+      const du = Math.max(0,
+        (Number(f.total_ttc) || 0)
+        - (Number(f.montant_acomptes_deduits) || 0)
+        - (Number(f.avoir_deduit_ttc) || 0)
+      )
       const paye = f.total_paye || 0
-      return sum + Math.max(0, f.solde_ttc - paye)
+      return sum + Math.max(0, du - paye)
     }, 0)
     const nbEnRetard = filtered.filter((f) => f.statut === 'en_retard').length
     const nbPayees = filtered.filter((f) => f.statut === 'payee').length
 
-    return { totalFacture, totalPaye, totalImpaye, nbEnRetard, nbPayees }
+    return { totalFactureHT, totalFactureTVA, totalPaye, totalImpaye, nbEnRetard, nbPayees }
   }, [filtered])
 
   const handleEnvoyer = async (id: string) => {
@@ -188,6 +222,32 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
       await refreshFactures()
     }
     setSendingId(null)
+  }
+
+  const [peppolSendingId, setPeppolSendingId] = useState<string | null>(null)
+  const handleEnvoyerPeppol = async (id: string) => {
+    setPeppolSendingId(id)
+    try {
+      const res = await fetch(`/api/peppol/${id}/send`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Erreur envoi Peppol')
+      } else {
+        toast.success(
+          data.test_mode
+            ? 'Envoye via Peppol (mode test : par email)'
+            : 'Envoye via Peppol au reseau B2B'
+        )
+        setFacturesList((prev) =>
+          prev.map((f) =>
+            f.id === id ? { ...f, peppol_statut: 'envoye' as const } : f
+          )
+        )
+      }
+    } catch {
+      toast.error('Erreur reseau Peppol')
+    }
+    setPeppolSendingId(null)
     setConfirmSendId(null)
   }
 
@@ -202,6 +262,74 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
       toast.success('Facture archivee')
       setFacturesList((prev) => prev.filter((f) => f.id !== id))
     }
+  }
+
+  const handleChangeStatut = async (
+    id: string,
+    newStatut: 'brouillon' | 'envoyee' | 'partiellement_payee' | 'payee' | 'en_retard'
+  ) => {
+    const { error } = await supabase
+      .from('factures')
+      .update({ statut: newStatut, updated_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) {
+      toast.error('Erreur lors du changement de statut')
+    } else {
+      toast.success('Statut mis a jour')
+      setFacturesList((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, statut: newStatut } : f))
+      )
+    }
+  }
+
+  const handleOpenAvoir = async (f: FactureWithClient) => {
+    const { data: lignes } = await supabase
+      .from('factures_lignes')
+      .select('id, designation, total_ht, taux_tva')
+      .eq('facture_id', f.id)
+      .eq('type', 'produit')
+      .order('ordre')
+    setAvoirLignes((lignes || []).map((l) => ({
+      id: l.id,
+      designation: l.designation,
+      total_ht: l.total_ht,
+      taux_tva: l.taux_tva,
+      montant: l.total_ht,
+      checked: true,
+    })))
+    setAvoirType('total')
+    setAvoirDialog(f)
+  }
+
+  const handleCreateAvoir = async () => {
+    if (!avoirDialog) return
+    setAvoirLoading(true)
+    try {
+      const body = avoirType === 'total'
+        ? { type: 'total' }
+        : {
+            type: 'partiel',
+            lignes: avoirLignes
+              .filter((l) => l.checked && l.montant > 0)
+              .map((l) => ({ ligne_id: l.id, montant_ht: l.montant })),
+          }
+      const res = await fetch(`/api/factures/${avoirDialog.id}/avoir`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || 'Erreur création note de crédit')
+      } else {
+        toast.success(`Note de crédit ${data.numero} créée`)
+        setAvoirDialog(null)
+        router.push(`/factures/${data.avoir_id}`)
+      }
+    } catch {
+      toast.error('Erreur réseau')
+    }
+    setAvoirLoading(false)
   }
 
   const handleDesarchiver = async (id: string) => {
@@ -270,14 +398,21 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
   }
 
   const getRestePayer = (f: FactureWithClient): number => {
+    if (f.statut === 'payee') return 0
+    const du = Math.max(0,
+      (Number(f.total_ttc) || 0)
+      - (Number(f.montant_acomptes_deduits) || 0)
+      - (Number(f.avoir_deduit_ttc) || 0)
+    )
     const paye = f.total_paye || 0
-    return Math.max(0, Math.round((f.solde_ttc - paye) * 100) / 100)
+    return Math.max(0, Math.round((du - paye) * 100) / 100)
   }
 
   const columnConfigs: ColumnConfig<FactureWithClient>[] = useMemo(() => [
     { key: 'numero', getValue: (f) => f.numero, sortType: 'string' as const },
     { key: 'type', getValue: (f) => f.type === 'avoir' ? 'NC' : f.type === 'acompte' ? 'Acompte' : f.type === 'situation' ? 'Situation' : 'Facture', sortType: 'string' as const },
     { key: 'client', getValue: (f) => getClientName(f), sortType: 'string' as const },
+    { key: 'reference', getValue: (f) => getFactureReference(f), sortType: 'string' as const },
     { key: 'date', getValue: (f) => f.date_facture, sortType: 'date' as const },
     { key: 'echeance', getValue: (f) => f.date_echeance || '', sortType: 'date' as const },
     { key: 'tva', getValue: (f) => (f.taux_tva_list || []).map((t) => `${t}%`).join(', '), sortType: 'string' as const },
@@ -303,6 +438,16 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-[#111827]">Factures</h1>
         <div className="flex items-center gap-2">
+          <Link href="/rapprochement">
+            <Button variant="outline" className="text-[#6B7280] border-[#E5E7EB] hover:border-[#F5B400] hover:text-[#F5B400]">
+              <Landmark className="h-4 w-4 mr-2" />
+              Rapprochement CODA
+            </Button>
+          </Link>
+          <Button variant="outline" onClick={() => setJournalOpen(true)} className="text-[#6B7280] border-[#E5E7EB] hover:border-[#F5B400] hover:text-[#F5B400]">
+            <Download className="h-4 w-4 mr-2" />
+            Journal des ventes
+          </Button>
           <Link href="/factures/nouveau?type=avoir">
             <Button variant="outline" className="border-[#DC2626] text-[#DC2626] hover:bg-[#DC2626]/5">
               <FileMinus className="h-4 w-4 mr-2" />
@@ -310,7 +455,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             </Button>
           </Link>
           <Link href="/factures/nouveau">
-            <Button className="bg-[#17C2D7] hover:bg-[#14a8bc] text-white shadow-sm">
+            <Button className="bg-[#F5B400] hover:bg-[#D89A00] text-[#0A0A0B] shadow-sm">
               <Plus className="h-4 w-4 mr-2" />
               Nouvelle facture
             </Button>
@@ -322,10 +467,12 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
       {canViewDashboard && <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
-            <TrendingUp className="h-4 w-4 text-[#17C2D7]" />
-            <span className="text-[12px] font-medium text-[#9CA3AF] uppercase tracking-wide">Total factures mensuel</span>
+            <TrendingUp className="h-4 w-4 text-[#F5B400]" />
+            <span className="text-[12px] font-medium text-[#9CA3AF] uppercase tracking-wide">Total factures HTVA</span>
           </div>
-          <p className="text-lg font-bold text-[#111827] tabular-nums">{formatMontant(stats.totalFacture)}</p>
+          <p className="text-lg font-bold text-[#111827] tabular-nums">{formatMontant(stats.totalFactureHT)}</p>
+          <p className="text-[11px] text-[#9CA3AF] mt-0.5">+ TVA {formatMontant(stats.totalFactureTVA)}</p>
+          <p className="text-[12px] font-semibold text-[#6B7280] tabular-nums mt-1 pt-1 border-t border-[#F3F4F6]">= {formatMontant(stats.totalFactureHT + stats.totalFactureTVA)} TTC</p>
         </div>
         <div className="bg-white border border-[#E5E7EB] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-1">
@@ -364,7 +511,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             placeholder="Rechercher une facture..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-10 border-[#E5E7EB] focus:border-[#17C2D7] focus:ring-[#17C2D7]/20"
+            className="pl-10 border-[#E5E7EB] focus:border-[#F5B400] focus:ring-[#F5B400]/20"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -373,7 +520,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             type="date"
             value={dateDebut}
             onChange={(e) => setDateDebut(e.target.value)}
-            className="w-[140px] border-[#E5E7EB] focus:border-[#17C2D7] focus:ring-[#17C2D7]/20 text-sm"
+            className="w-[140px] border-[#E5E7EB] focus:border-[#F5B400] focus:ring-[#F5B400]/20 text-sm"
             placeholder="Du"
           />
           <span className="text-[#9CA3AF] text-sm">au</span>
@@ -381,14 +528,14 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             type="date"
             value={dateFin}
             onChange={(e) => setDateFin(e.target.value)}
-            className="w-[140px] border-[#E5E7EB] focus:border-[#17C2D7] focus:ring-[#17C2D7]/20 text-sm"
+            className="w-[140px] border-[#E5E7EB] focus:border-[#F5B400] focus:ring-[#F5B400]/20 text-sm"
             placeholder="Au"
           />
           <Button
             variant={dateDebut === firstOfMonth && dateFin === todayStr ? 'default' : 'outline'}
             size="sm"
             onClick={() => { setDateDebut(firstOfMonth); setDateFin(todayStr) }}
-            className={dateDebut === firstOfMonth && dateFin === todayStr ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7] text-xs px-3'}
+            className={dateDebut === firstOfMonth && dateFin === todayStr ? 'bg-[#F5B400] hover:bg-[#D89A00] text-[#0A0A0B] border-[#F5B400] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#F5B400] hover:text-[#F5B400] text-xs px-3'}
           >
             Ce mois
           </Button>
@@ -396,7 +543,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             variant={!dateDebut && !dateFin ? 'default' : 'outline'}
             size="sm"
             onClick={() => { setDateDebut(''); setDateFin('') }}
-            className={!dateDebut && !dateFin ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7] text-xs px-3'}
+            className={!dateDebut && !dateFin ? 'bg-[#F5B400] hover:bg-[#D89A00] text-[#0A0A0B] border-[#F5B400] text-xs px-3' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#F5B400] hover:text-[#F5B400] text-xs px-3'}
           >
             Tout
           </Button>
@@ -420,7 +567,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
               variant={statutFilter === s ? 'default' : 'outline'}
               size="sm"
               onClick={() => setStatutFilter(s)}
-              className={statutFilter === s ? 'bg-[#17C2D7] hover:bg-[#14a8bc] text-white border-[#17C2D7]' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#17C2D7] hover:text-[#17C2D7]'}
+              className={statutFilter === s ? 'bg-[#F5B400] hover:bg-[#D89A00] text-[#0A0A0B] border-[#F5B400]' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#F5B400] hover:text-[#F5B400]'}
             >
               {s === 'tous' ? 'Tous' : (statutConfig[s]?.label || s)}
             </Button>
@@ -440,7 +587,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
               variant={typeFilter === t.key ? 'default' : 'outline'}
               size="sm"
               onClick={() => setTypeFilter(t.key)}
-              className={typeFilter === t.key ? 'bg-[#1E2028] hover:bg-[#111827] text-white border-[#1E2028]' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#1E2028] hover:text-[#1E2028]'}
+              className={typeFilter === t.key ? 'bg-[#0B0B0D] hover:bg-[#111827] text-white border-[#0B0B0D]' : 'text-[#6B7280] border-[#E5E7EB] hover:border-[#0B0B0D] hover:text-[#0B0B0D]'}
             >
               {t.label}
             </Button>
@@ -449,9 +596,11 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
       </div>
 
       {sortedFiltered.length === 0 ? (
-        <div className="text-center py-16 text-[#9CA3AF]">
-          <Receipt className="h-10 w-10 mx-auto mb-3 opacity-40" />
-          <p className="text-[13px]">Aucune facture trouvee</p>
+        <div className="border border-[#E5E7EB] rounded-xl bg-white w-full">
+          <div className="text-center py-16 text-[#9CA3AF]">
+            <Receipt className="h-10 w-10 mx-auto mb-3 opacity-40" />
+            <p className="text-[13px]">Aucune facture trouvee</p>
+          </div>
         </div>
       ) : (
         <div className="border border-[#E5E7EB] rounded-xl overflow-hidden bg-white">
@@ -461,6 +610,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                 <SortableTableHead label="Numero" columnKey="numero" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['numero'] || ''} onFilterChange={setColumnFilter} />
                 <SortableTableHead label="Type" columnKey="type" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['type'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <SortableTableHead label="Client" columnKey="client" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['client'] || ''} onFilterChange={setColumnFilter} />
+                <SortableTableHead label="Reference" columnKey="reference" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['reference'] || ''} onFilterChange={setColumnFilter} className="hidden lg:table-cell" />
                 <SortableTableHead label="Date" columnKey="date" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['date'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <SortableTableHead label="Echeance" columnKey="echeance" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['echeance'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
                 <SortableTableHead label="TVA" columnKey="tva" sortKey={sortKey} sortDirection={sortDirection} onToggleSort={toggleSort} filterValue={columnFilters['tva'] || ''} onFilterChange={setColumnFilter} className="hidden md:table-cell" />
@@ -477,12 +627,24 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                 return (
                   <TableRow key={f.id} className="hover:bg-[#F9FAFB]/50">
                     <TableCell>
-                      <Link
-                        href={`/factures/${f.id}`}
-                        className="font-medium text-[#111827] hover:text-[#17C2D7] transition-colors"
-                      >
-                        {f.numero}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/factures/${f.id}`}
+                          className="font-medium text-[#111827] hover:text-[#F5B400] transition-colors"
+                        >
+                          {f.numero}
+                        </Link>
+                        {f.peppol_statut === 'envoye' && (
+                          <Badge className="bg-[#F5B400]/15 text-[#D89A00] border-[#F5B400]/30 text-[10px] px-1.5 py-0" title={`Envoyee via Peppol${f.peppol_sent_at ? ' le ' + new Date(f.peppol_sent_at).toLocaleDateString('fr-BE') : ''}`}>
+                            Peppol
+                          </Badge>
+                        )}
+                        {f.peppol_statut === 'echec' && (
+                          <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px] px-1.5 py-0" title={f.peppol_error || 'Echec Peppol'}>
+                            Peppol ✗
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       <Badge variant="secondary" className={
@@ -495,6 +657,9 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                       </Badge>
                     </TableCell>
                     <TableCell className="text-[#6B7280]">{getClientName(f)}</TableCell>
+                    <TableCell className="hidden lg:table-cell text-[#525252] max-w-[260px] truncate" title={getFactureReference(f)}>
+                      {getFactureReference(f) || <span className="text-[#D1D5DB]">&mdash;</span>}
+                    </TableCell>
                     <TableCell className="hidden md:table-cell text-[#9CA3AF]">
                       {formatDate(f.date_facture)}
                     </TableCell>
@@ -526,7 +691,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                       ) : f.statut !== 'brouillon' ? (
                         <button
                           onClick={() => setPaiementFacture(f)}
-                          className="inline-flex items-center gap-1.5 text-[#DC2626] hover:text-[#17C2D7] cursor-pointer transition-colors duration-150 group"
+                          className="inline-flex items-center gap-1.5 text-[#DC2626] hover:text-[#F5B400] cursor-pointer transition-colors duration-150 group"
                           title="Enregistrer un paiement"
                         >
                           <CreditCard className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -544,12 +709,35 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      {f.statut !== 'brouillon' ? (
-                        <span className="inline-flex items-center gap-1 text-[13px] text-[#9CA3AF]">
-                          <Eye className="h-3.5 w-3.5" />
-                          {f.email_ouvertures || 0}
-                        </span>
-                      ) : null}
+                      {f.nombre_envois > 0 || f.email_ouvertures > 0 ? (() => {
+                        const vues = f.email_ouvertures || 0
+                        const envois = f.nombre_envois || 0
+                        const lastOpenStr = f.email_derniere_ouverture
+                          ? formatDate(f.email_derniere_ouverture)
+                          : null
+                        if (vues > 0) {
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 text-[12px] text-emerald-700 font-medium"
+                              title={lastOpenStr ? `Dernière vue le ${lastOpenStr}` : ''}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              {vues}× {lastOpenStr && <span className="text-[10px] text-emerald-600 font-normal">({lastOpenStr})</span>}
+                            </span>
+                          )
+                        }
+                        return (
+                          <span
+                            className="inline-flex items-center gap-1 text-[12px] text-[#9CA3AF]"
+                            title="Envoyée mais aucune ouverture détectée (l'email peut être lu sans charger les images)"
+                          >
+                            <Send className="h-3 w-3" />
+                            {envois}× envoyée
+                          </span>
+                        )
+                      })() : (
+                        <span className="text-[#D1D5DB]">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -579,7 +767,38 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                               ) : (
                                 <Send className="h-4 w-4 mr-2" />
                               )}
-                              {f.statut === 'envoyee' ? 'Renvoyer' : 'Envoyer'}
+                              {f.statut === 'envoyee' ? 'Renvoyer par email' : 'Envoyer par email'}
+                            </DropdownMenuItem>
+                          )}
+                          {(() => {
+                            const isAcompte = f.type === 'acompte'
+                            const notPro = f.client?.type !== 'professionnel'
+                            const disabled = isAcompte || notPro || peppolSendingId === f.id
+                            const reason = isAcompte
+                              ? 'Peppol : factures et avoirs uniquement (pas les acomptes)'
+                              : notPro
+                              ? 'Peppol : clients B2B (professionnels) uniquement'
+                              : ''
+                            return (
+                              <DropdownMenuItem
+                                onClick={() => !disabled && handleEnvoyerPeppol(f.id)}
+                                disabled={disabled}
+                                title={reason}
+                              >
+                                {peppolSendingId === f.id ? (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Send className="h-4 w-4 mr-2 text-[#F5B400]" />
+                                )}
+                                {f.peppol_statut === 'envoye' ? 'Renvoyer via Peppol' : 'Envoyer via Peppol'}
+                                {reason && <span className="ml-2 text-[10px] text-muted-foreground">(B2B)</span>}
+                              </DropdownMenuItem>
+                            )
+                          })()}
+                          {f.type !== 'avoir' && (
+                            <DropdownMenuItem onClick={() => handleOpenAvoir(f)}>
+                              <FileMinus className="h-4 w-4 mr-2" />
+                              Créer une note de crédit
                             </DropdownMenuItem>
                           )}
                           {f.statut !== 'brouillon' && f.statut !== 'payee' && (
@@ -590,6 +809,26 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
                               Enregistrer un paiement
                             </DropdownMenuItem>
                           )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <CheckCircle2 className="h-4 w-4 mr-2" />
+                              Changer le statut
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              {(['brouillon', 'envoyee', 'partiellement_payee', 'payee', 'en_retard'] as const).map((s) => (
+                                <DropdownMenuItem
+                                  key={s}
+                                  disabled={f.statut === s}
+                                  onClick={() => handleChangeStatut(f.id, s)}
+                                >
+                                  {f.statut === s && <CheckCircle2 className="h-3 w-3 mr-2 text-[#F5B400]" />}
+                                  {f.statut !== s && <span className="w-3 h-3 mr-2" />}
+                                  {statutConfig[s]?.label || s}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
                           <DropdownMenuItem
                             className="text-[#DC2626]"
                             onClick={() => handleArchive(f.id)}
@@ -628,7 +867,7 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
             <AlertDialogAction
               onClick={() => confirmSendId && handleEnvoyer(confirmSendId)}
               disabled={!!sendingId}
-              className="bg-[#17C2D7] hover:bg-[#14a8bc]"
+              className="bg-[#F5B400] hover:bg-[#D89A00]"
             >
               {sendingId ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -695,6 +934,143 @@ export function FacturesPageContent({ initialFactures, initialTvaMap = {}, canVi
           onSuccess={refreshFactures}
         />
       )}
+
+      {/* Note de crédit (avoir) dialog */}
+      <Dialog open={!!avoirDialog} onOpenChange={(open) => { if (!open) setAvoirDialog(null) }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-[15px] font-semibold text-[#0A0A0B]">
+              Note de crédit — {avoirDialog?.numero}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Type selector */}
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={() => setAvoirType('total')}
+              className={`flex-1 py-2 rounded-lg text-[13px] font-medium border transition-colors ${avoirType === 'total' ? 'bg-[#0B0B0D] text-white border-[#0B0B0D]' : 'bg-white text-[#374151] border-[#E5E7EB] hover:bg-[#F9FAFB]'}`}
+            >
+              Total
+            </button>
+            <button
+              onClick={() => setAvoirType('partiel')}
+              className={`flex-1 py-2 rounded-lg text-[13px] font-medium border transition-colors ${avoirType === 'partiel' ? 'bg-[#0B0B0D] text-white border-[#0B0B0D]' : 'bg-white text-[#374151] border-[#E5E7EB] hover:bg-[#F9FAFB]'}`}
+            >
+              Partiel
+            </button>
+          </div>
+
+          {avoirType === 'total' && avoirDialog && (
+            <p className="text-[13px] text-[#6B7280] bg-[#F9FAFB] rounded-lg px-4 py-3 mt-1">
+              La note de crédit annulera intégralement la facture <span className="font-semibold text-[#0A0A0B]">{avoirDialog.numero}</span> pour un montant de <span className="font-semibold text-[#0A0A0B]">{formatMontant(avoirDialog.total_ht)} HT</span> ({formatMontant(avoirDialog.total_ttc)} TTC).
+            </p>
+          )}
+
+          {avoirType === 'partiel' && (
+            <div className="mt-1 space-y-2 max-h-64 overflow-y-auto">
+              {avoirLignes.length === 0 && (
+                <p className="text-[13px] text-[#9CA3AF] text-center py-4">Aucune ligne de produit sur cette facture</p>
+              )}
+              {avoirLignes.map((l, i) => (
+                <div key={l.id} className="flex items-center gap-3 py-2 border-b border-[#F3F4F6] last:border-0">
+                  <input
+                    type="checkbox"
+                    checked={l.checked}
+                    onChange={(e) => setAvoirLignes((prev) => prev.map((x, j) => j === i ? { ...x, checked: e.target.checked } : x))}
+                    className="h-4 w-4 rounded accent-[#0B0B0D]"
+                  />
+                  <span className="flex-1 text-[13px] text-[#374151] truncate">{l.designation || '—'}</span>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={l.total_ht}
+                      value={l.montant}
+                      disabled={!l.checked}
+                      onChange={(e) => setAvoirLignes((prev) => prev.map((x, j) => j === i ? { ...x, montant: parseFloat(e.target.value) || 0 } : x))}
+                      className="w-28 h-7 text-[12px] text-right"
+                    />
+                    <span className="text-[11px] text-[#9CA3AF]">€ HT</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Totals preview */}
+          {(() => {
+            let totalHT = 0, totalTVA = 0
+            if (avoirType === 'total' && avoirDialog) {
+              totalHT = avoirDialog.total_ht
+              totalTVA = avoirDialog.total_tva
+            } else {
+              avoirLignes.filter((l) => l.checked).forEach((l) => {
+                totalHT += l.montant
+                totalTVA += Math.round(l.montant * l.taux_tva) / 100
+              })
+            }
+            const totalTTC = Math.round((totalHT + totalTVA) * 100) / 100
+            return (
+              <div className="space-y-1 text-[13px]">
+                <div className="flex justify-between text-[#6B7280]">
+                  <span>Total HT</span><span>{formatMontant(Math.round(totalHT * 100) / 100)}</span>
+                </div>
+                <div className="flex justify-between text-[#6B7280]">
+                  <span>TVA</span><span>{formatMontant(Math.round(totalTVA * 100) / 100)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-[#0A0A0B]">
+                  <span>Total TTC</span><span>{formatMontant(totalTTC)}</span>
+                </div>
+              </div>
+            )
+          })()}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setAvoirDialog(null)} disabled={avoirLoading}>
+              Annuler
+            </Button>
+            <Button
+              onClick={handleCreateAvoir}
+              disabled={avoirLoading || (avoirType === 'partiel' && avoirLignes.filter((l) => l.checked && l.montant > 0).length === 0)}
+              className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
+            >
+              {avoirLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileMinus className="h-4 w-4 mr-2" />}
+              Créer la note de crédit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={journalOpen} onOpenChange={setJournalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-[15px] font-semibold text-[#0A0A0B]">Journal des ventes — export Excel</DialogTitle>
+          </DialogHeader>
+          <p className="text-[12px] text-[#9CA3AF]">Export des factures de vente sur la période (aide à la saisie comptable).</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Du</Label>
+              <Input type="date" value={jDebut} onChange={(e) => setJDebut(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[12px]">Au</Label>
+              <Input type="date" value={jFin} onChange={(e) => setJFin(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="outline" onClick={() => setJournalOpen(false)}>Annuler</Button>
+            <Button
+              onClick={() => { window.open(`/api/factures/journal-ventes?debut=${jDebut}&fin=${jFin}`, '_blank'); setJournalOpen(false) }}
+              className="bg-[#0B0B0D] hover:bg-[#1F1F23] text-white"
+            >
+              <Download className="h-4 w-4 mr-2" /> Télécharger
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
